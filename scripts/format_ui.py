@@ -4,13 +4,12 @@ import gradio as gr
 import regex as re
 from modules import script_callbacks, scripts, shared
 
-
 """
 Formatting settings
 """
 SPACE_COMMAS = True
 BRACKET2WEIGHT = True
-SPACE2UNDERSCORE = False
+CONV_SPUND = "None"
 
 """
 Regex stuff
@@ -24,9 +23,9 @@ re_comma_spacing = re.compile(r",+")
 re_brackets_fix_whitespace = re.compile(r"([\(\[{<])\s*|\s*([\)\]}>}])")
 re_opposing_brackets = re.compile(r"([)\]}>])([([{<])")
 re_networks = re.compile(r"<.+?>")
-re_bracket_open = re.compile(r"[(\[]")
-re_brackets_open = re.compile(r"\(+|\[+")
-re_brackets_closing = re.compile(r"\)+|\]+")
+re_bracket_open = re.compile(r"(?<!\\)[([]")
+re_brackets_open = re.compile(r"(?<!\\)(\(+|\[+)")
+re_brackets_closing = re.compile(r"(?<!\\)(\)+|\]+)")
 re_colon_spacing = re.compile(r"\s*(:)\s*")
 re_colon_spacing_composite = re.compile(r"\s*(:)\s*(?=\d*?\.?\d*?\s*?AND)")
 re_colon_spacing_comp_end = re.compile(r"(?<=AND[^:]*?)(:)(?=[^:]*$)")
@@ -43,31 +42,24 @@ References
 """
 ui_prompts = []
 
-
 """
 Functions
 """
 
-
 def get_bracket_closing(c: str):
     return brackets_closing[brackets_opening.find(c)]
-
 
 def get_bracket_opening(c: str):
     return brackets_opening[brackets_closing.find(c)]
 
-
 def normalize_characters(data: str):
     return unicodedata.normalize("NFKC", data)
-
 
 def tokenize(data: str) -> list:
     return re_tokenize.split(data)
 
-
 def remove_whitespace_excessive(prompt: str):
     return " ".join(re.split(re_whitespace, prompt))
-
 
 def align_brackets(prompt: str):
     def helper(match: re.Match):
@@ -75,13 +67,11 @@ def align_brackets(prompt: str):
 
     return re_brackets_fix_whitespace.sub(helper, prompt)
 
-
 def space_and(prompt: str):
     def helper(match: re.Match):
         return " ".join(match.groups())
 
     return re_and.sub(helper, prompt)
-
 
 def align_colons(prompt: str):
     def normalize(match: re.Match):
@@ -96,7 +86,6 @@ def align_colons(prompt: str):
     ret = re_colon_spacing.sub(normalize, prompt)
     ret = re_colon_spacing_composite.sub(composite, ret)
     return re_colon_spacing_comp_end.sub(composite_end, ret)
-
 
 def align_commas(prompt: str):
     if not SPACE_COMMAS:
@@ -114,14 +103,11 @@ def align_commas(prompt: str):
     split = filter(None, split)
     return ", ".join(split)
 
-
 def extract_networks(tokens: list):
     return list(filter(lambda token: re_networks.match(token), tokens))
 
-
 def remove_networks(tokens: list):
     return list(filter(lambda token: not re_networks.match(token), tokens))
-
 
 def remove_mismatched_brackets(prompt: str):
     stack = []
@@ -150,7 +136,6 @@ def remove_mismatched_brackets(prompt: str):
 
     return ret
 
-
 def space_bracekts(prompt: str):
     def helper(match: re.Match):
         # print(' '.join(match.groups()))
@@ -159,13 +144,11 @@ def space_bracekts(prompt: str):
     # print(prompt)
     return re_opposing_brackets.sub(helper, prompt)
 
-
 def align_alternating(prompt: str):
     def helper(match: re.Match):
         return match.group(1)
 
     return re_pipe.sub(helper, prompt)
-
 
 def bracket_to_weights(prompt: str):
     """Convert excessive brackets to weight.
@@ -301,7 +284,7 @@ def bracket_to_weights(prompt: str):
                         ret[: open_bracketing.start()]
                         + "("
                         + ret[open_bracketing.start() + valid_consecutive : insert_at]
-                        + f":{weight:.2f}"
+                        + f"{weight:.2f}".rstrip("0").rstrip(".")
                         + ")"
                         + ret[insert_at + consecutive :]
                     )
@@ -317,7 +300,6 @@ def bracket_to_weights(prompt: str):
         pos = match.start()
     return None
 
-
 def depth_to_map(s: str):
     ret = ""
     depth = 0
@@ -328,7 +310,6 @@ def depth_to_map(s: str):
             depth -= 1
         ret += str(depth)
     return ret
-
 
 def depth_to_gradeint(s: str):
     ret = ""
@@ -341,18 +322,14 @@ def depth_to_gradeint(s: str):
             ret += "-"
     return ret
 
-
 def filter_brackets(s: str):
     return "".join(list(map(lambda c: c if c in "[]()" else " ", s)))
-
 
 def get_mappings(s: str):
     return depth_to_map(s), depth_to_gradeint(s), filter_brackets(s)
 
-
 def calculate_weight(d: str, is_square_brackets: bool):
     return 1 / 1.1 ** int(d) if is_square_brackets else 1 * 1.1 ** int(d)
-
 
 def get_weight(
     prompt: str,
@@ -388,22 +365,21 @@ def get_weight(
     msg = f"Somehow weight index searching has gone outside of prompt length with prompt: {prompt}"
     raise Exception(msg)
 
-
 def space_to_underscore(prompt: str):
+    is_space_to_underscore = CONV_SPUND == "Spaces to underscores"
     # We need to look ahead and ignore any spaces/underscores within network tokens
     # INPUT     <lora:chicken butt>, multiple subjects
     # OUTPUT    <lora:chicken butt>, multiple_subjects
     match = (
         r"(?<!BREAK) +(?!BREAK|[^<]*>)"
-        if SPACE2UNDERSCORE
+        if is_space_to_underscore
         else r"(?<!BREAK|_)_(?!_|BREAK|[^<]*>)"
     )
-    replace = "_" if SPACE2UNDERSCORE else " "
+    replace = "_" if is_space_to_underscore else " "
 
     tokens: str = tokenize(prompt)
 
     return ",".join(map(lambda t: re.sub(match, replace, t), tokens))
-
 
 def escape_bracket_index(token, symbols, start_index=0):
     # Given a token and a set of open bracket symbols, find the index in which that character
@@ -427,7 +403,6 @@ def escape_bracket_index(token, symbols, start_index=0):
 
     return i
 
-
 def format_prompt(*prompts: list):
     sync_settings()
 
@@ -444,7 +419,10 @@ def format_prompt(*prompts: list):
 
         # Clean up whitespace for cool beans
         prompt = remove_whitespace_excessive(prompt)
-        prompt = space_to_underscore(prompt)
+
+        if CONV_SPUND != "None":
+            prompt = space_to_underscore(prompt)
+
         prompt = align_brackets(prompt)
         prompt = space_and(prompt)  # for proper compositing alignment on colons
         prompt = space_bracekts(prompt)
@@ -457,25 +435,21 @@ def format_prompt(*prompts: list):
 
     return ret
 
-
 def on_before_component(component: gr.component, **kwargs: dict):
     if "elem_id" in kwargs:
-        if kwargs["elem_id"] in [
-            "txt2img_prompt",
-            "txt2img_neg_prompt",
-            "img2img_prompt",
-            "img2img_neg_prompt",
-        ]:
+        elem_id = kwargs["elem_id"]
+
+        if elem_id in ["txt2img_prompt", "txt2img_neg_prompt", "img2img_prompt", "img2img_neg_prompt", 'hires_prompt', 'hires_neg_prompt']:
             ui_prompts.append(component)
             return None
-        elif kwargs["elem_id"] == "paste":
+        elif elem_id == "paste":
             with gr.Blocks(analytics_enabled=False) as ui_component:
-                button = gr.Button(value="🪄", elem_classes="tool", elem_id="format")
+                button = gr.Button(value="💫", elem_classes="tool", elem_id="format")
                 button.click(fn=format_prompt, inputs=ui_prompts, outputs=ui_prompts)
                 return ui_component
+
         return None
     return None
-
 
 def on_ui_settings():
     section = ("pformat", "Prompt Formatter")
@@ -500,25 +474,23 @@ def on_ui_settings():
         ),
     )
     shared.opts.add_option(
-        "pfromat_space2underscore",
+        "pfromat_convert_space_underscore",
         shared.OptionInfo(
-            False,
-            "Convert spaces to underscores (default: underscore to spaces)",
-            gr.Checkbox,
-            {"interactive": True},
+            "None",
+            "Space/underscore convert handling",
+            gr.Radio,
+            {"choices": ["None", "Spaces to underscores", "Underscores to spaces"]},
             section=section,
         ),
     )
 
     sync_settings()
 
-
 def sync_settings():
-    global SPACE_COMMAS, BRACKET2WEIGHT, SPACE2UNDERSCORE
+    global SPACE_COMMAS, BRACKET2WEIGHT, CONV_SPUND
     SPACE_COMMAS = shared.opts.pformat_space_commas
     BRACKET2WEIGHT = shared.opts.pfromat_bracket2weight
-    SPACE2UNDERSCORE = shared.opts.pfromat_space2underscore
-
+    CONV_SPUND = shared.opts.pfromat_convert_space_underscore
 
 script_callbacks.on_before_component(on_before_component)
 script_callbacks.on_ui_settings(on_ui_settings)
