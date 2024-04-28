@@ -284,7 +284,7 @@ def bracket_to_weights(prompt: str):
                         ret[: open_bracketing.start()]
                         + "("
                         + ret[open_bracketing.start() + valid_consecutive : insert_at]
-                        + f"{weight:.2f}".rstrip("0").rstrip(".")
+                        + f":{weight:.2f}".rstrip("0").rstrip(".")
                         + ")"
                         + ret[insert_at + consecutive :]
                     )
@@ -439,7 +439,7 @@ def on_before_component(component: gr.component, **kwargs: dict):
     if "elem_id" in kwargs:
         elem_id = kwargs["elem_id"]
 
-        if elem_id in ["txt2img_prompt", "txt2img_neg_prompt", "img2img_prompt", "img2img_neg_prompt", 'hires_prompt', 'hires_neg_prompt']:
+        if elem_id in ["txt2img_prompt", "txt2img_neg_prompt", "img2img_prompt", "img2img_neg_prompt"]:
             ui_prompts.append(component)
             return None
         elif elem_id == "paste":
