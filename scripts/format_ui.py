@@ -243,7 +243,6 @@ def bracket_to_weights(prompt: str):
     gradient_search = []
 
     while pos < len(ret):
-        current_position = ret[pos:]
         if ret[pos] in "([":
             open_bracketing = re_brackets_open.match(ret, pos)
             consecutive = len(open_bracketing.group(0))
@@ -366,20 +365,19 @@ def get_weight(
     raise Exception(msg)
 
 def space_to_underscore(prompt: str):
-    is_space_to_underscore = CONV_SPUND == "Spaces to underscores"
-    # We need to look ahead and ignore any spaces/underscores within network tokens
-    # INPUT     <lora:chicken butt>, multiple subjects
-    # OUTPUT    <lora:chicken butt>, multiple_subjects
-    match = (
-        r"(?<!BREAK) +(?!BREAK|[^<]*>)"
-        if is_space_to_underscore
-        else r"(?<!BREAK|_)_(?!_|BREAK|[^<]*>)"
-    )
-    replace = "_" if is_space_to_underscore else " "
+    if CONV_SPUND == "None":
+        return prompt
+    elif CONV_SPUND == "Spaces to underscores":
+        match = r"(?<!BREAK) +(?!BREAK|[^<]*>)"
+        replace = "_"
+    else:
+        match = r"(?<!BREAK|_)_(?!_|BREAK|[^<]*>)"
+        replace = " "
 
-    tokens: str = tokenize(prompt)
+    tokens = [t.strip() for t in prompt.split(",")]
+    tokens = map(lambda t: re.sub(match, replace, t), tokens)
 
-    return ",".join(map(lambda t: re.sub(match, replace, t), tokens))
+    return ",".join(tokens)
 
 def escape_bracket_index(token, symbols, start_index=0):
     # Given a token and a set of open bracket symbols, find the index in which that character
@@ -419,10 +417,7 @@ def format_prompt(*prompts: list):
 
         # Clean up whitespace for cool beans
         prompt = remove_whitespace_excessive(prompt)
-
-        if CONV_SPUND != "None":
-            prompt = space_to_underscore(prompt)
-
+        prompt = space_to_underscore(prompt)
         prompt = align_brackets(prompt)
         prompt = space_and(prompt)  # for proper compositing alignment on colons
         prompt = space_bracekts(prompt)
