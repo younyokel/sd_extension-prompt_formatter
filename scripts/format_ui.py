@@ -16,7 +16,7 @@ Regex stuff
 """
 brackets_opening = "([{<"
 brackets_closing = ")]}>"
-
+re_angle_bracket = re.compile(r"<[^>]+>")
 re_whitespace = re.compile(r"[^\S\r\n]+")  # excludes new lines
 re_tokenize = re.compile(r",")
 re_comma_spacing = re.compile(r",+")
@@ -235,7 +235,7 @@ def bracket_to_weights(prompt: str):
     if not BRACKET2WEIGHT:
         return prompt
 
-    re_existing_weight = re.compile(r"(:\d+.?\d*)[)\]]$")
+    # re_existing_weight = re.compile(r"(:\d+.?\d*)[)\]]$")
     depths, gradients, brackets = get_mappings(prompt)
 
     pos = 0
