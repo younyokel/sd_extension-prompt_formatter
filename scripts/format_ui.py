@@ -151,153 +151,104 @@ def align_alternating(prompt: str):
     return re_pipe.sub(helper, prompt)
 
 def bracket_to_weights(prompt: str):
-    """Convert excessive brackets to weight.
-
-    When scanning, we need a way to ignore prompt editing, composable, and alternating
-    we still need to weigh their individual words within them, however...
-
-    use a depth counter to ensure that we find closing brackets
-
-    the problem is that as we modify the string, we will be changing it's length,
-    which will mess with iterations...
-        we can simply edit the string backwards, that way the operations don't effect
-        the length of the parts we're working on... however, if we do this, then we can't
-        remove consecutive brackets of the same type, we we would need to remove bracketing
-        to the left of the part of the string we're working on.
-
-    well, i think we should be fine with a while pos != end of string, and if we find
-    a weight to add, break from the enumerate loop and resume at position to re-enumerate
-    the new string
-
-    go until we reach a [(, ignore networks < and wildcards {
-    if (
-        count if consecutive repeating bracket
-        look forward to find its corresponding closing bracket
-        check if those closing brackets are also consecutive
-        add weighting at the end
-        remove excessive bracket
-        convert bracket to ()
-    if [
-        count if consecutive repeating bracket
-        look forward
-            if we find a : or |, return/break from this weight search
-            else, to find its corresponding closing bracket
-            check if those closing brackets are also consecutive
-            add weighting at the end
-            remove excessive bracket
-            convert bracket to ()
-
-    IF BRACKETS ARE CONSECUTIVE, AND AFTER THEIR SLOPE, BOTH THEIR
-    INNER-NEXT DEPTH ARE THE SAME, IT IS A WEIGHT.
-
-    Example using map_depth.
-    c, ((a, b))
-       ((    ))
-    00012222210
-    ---^^----vv
-    2     ____  2
-    1    /===>\\ 1
-    0___/=====>\0
-    Because 01 can meet on the other side, these are matching
-
-    c, (a, (b))
-       (   ( ))
-    00011112210
-    ---^---^-vv
-    2        _  2
-    1    ___/>\\ 1
-    0___/=====>\0
-    0 and 1 match, but since gradients are not exactly mirrored,
-    thier weights should not be combined.
-
-    c, ((a), b)
-       (( )   )
-    00012211110
-    ---^^-v---v
-    2     _     2
-    1    /=\\___ 1
-    0___/=====>\0
-    Similar idea to above example.
-
-    c, ((a), ((b)))
-       (( )  (( )))
-    000122111233210
-    ---^^-v--^^-vvv
-    3           _   3
-    2     _    />\\  2
-    1    />\\__/==>\\ 1
-    0___/=========>\0
-    Tricky one. Here, 01 open together, so there's a potential that their
-    weights should be combined if they close together, but instead 1 closes
-    early. We only need to check for closure initial checking depth - 1.
-
-    """  # noqa: D301
     if not BRACKET2WEIGHT:
         return prompt
+    
+    # Identify regions enclosed within angle brackets
+    excluded_regions = []
+    for match in re_angle_bracket.finditer(prompt):
+        excluded_regions.append((match.start(), match.end()))
 
-    # re_existing_weight = re.compile(r"(:\d+.?\d*)[)\]]$")
-    depths, gradients, brackets = get_mappings(prompt)
+    # Split the prompt into sections that are not within angle brackets
+    segments = []
+    previous_position = 0
+    for start, end in excluded_regions:
+        segments.append(prompt[previous_position:start])
+        previous_position = end
+    segments.append(prompt[previous_position:])
 
-    pos = 0
-    ret = prompt
-    gradient_search = []
+    # Process each segment separately
+    updated_segments = []
+    for segment in segments:
+        depths, gradients, brackets = get_mappings(segment)
+        pos = 0
+        ret = segment
 
-    while pos < len(ret):
-        if ret[pos] in "([":
-            open_bracketing = re_brackets_open.match(ret, pos)
-            consecutive = len(open_bracketing.group(0))
-            gradient_search = "".join(
-                map(
-                    str,
-                    reversed(
-                        range(int(depths[pos]) - 1, int(depths[pos]) + consecutive)
-                    ),
-                )
-            )
-            is_square_brackets = "[" in open_bracketing.group(0)
-
-            insert_at, weight, valid_consecutive = get_weight(
-                ret,
-                gradients,
-                depths,
-                brackets,
-                open_bracketing.end(),
-                consecutive,
-                gradient_search,
-                is_square_brackets,
-            )
-
-            if weight:
-                # If weight already exists, ignore
-                current_weight = re_existing_weight.search(ret[: insert_at + 1])
-                if current_weight:
-                    ret = (
-                        ret[: open_bracketing.start()]
-                        + "("
-                        + ret[open_bracketing.start() + valid_consecutive : insert_at]
-                        + ")"
-                        + ret[insert_at + consecutive :]
+        while pos < len(ret):
+            if ret[pos] in "([":
+                open_bracketing = re_brackets_open.match(ret, pos)
+                if open_bracketing:
+                    consecutive = len(open_bracketing.group(0))
+                    gradient_search = "".join(
+                        map(
+                            str,
+                            reversed(
+                                range(
+                                    int(depths[pos]) - 1,
+                                    int(depths[pos]) + consecutive
+                                ),
+                            )
+                        )
                     )
-                else:
-                    ret = (
-                        ret[: open_bracketing.start()]
-                        + "("
-                        + ret[open_bracketing.start() + valid_consecutive : insert_at]
-                        + f":{weight:.2f}".rstrip("0").rstrip(".")
-                        + ")"
-                        + ret[insert_at + consecutive :]
+                    is_square_brackets = "[" in open_bracketing.group(0)
+
+                    insert_at, weight, valid_consecutive = get_weight(
+                        ret,
+                        gradients,
+                        depths,
+                        brackets,
+                        open_bracketing.end(),
+                        consecutive,
+                        gradient_search,
+                        is_square_brackets,
                     )
 
-            depths, gradients, brackets = get_mappings(ret)
-            pos += 1
+                    if weight:
+                        # If weight already exists, ignore
+                        current_weight = re_existing_weight.search(
+                            ret[:insert_at + 1]
+                        )
+                        if current_weight:
+                            ret = (
+                                ret[:open_bracketing.start()]
+                                + "("
+                                + ret[
+                                    open_bracketing.start() + valid_consecutive : insert_at
+                                ]
+                                + ")"
+                                + ret[insert_at + consecutive :]
+                            )
+                        else:
+                            ret = (
+                                ret[:open_bracketing.start()]
+                                + "("
+                                + ret[
+                                    open_bracketing.start() + valid_consecutive : insert_at
+                                ]
+                                + f":{weight:.2f}".rstrip("0").rstrip(".")
+                                + ")"
+                                + ret[insert_at + consecutive :]
+                            )
 
-        match = re_bracket_open.search(ret, pos)
+                    depths, gradients, brackets = get_mappings(ret)
+                    pos += 1
 
-        if not match:  # no more potential weight brackets to parse
-            return ret
+            match = re_bracket_open.search(ret, pos)
 
-        pos = match.start()
-    return None
+            if not match:  # no more potential weight brackets to parse
+                break
+
+            pos = match.start()
+        updated_segments.append(ret)
+
+    # Reassemble the final prompt with the excluded regions
+    final_prompt = ""
+    for i, segment in enumerate(updated_segments):
+        final_prompt += segment
+        if i < len(excluded_regions):
+            final_prompt += prompt[excluded_regions[i][0]:excluded_regions[i][1]]
+
+    return final_prompt
 
 def depth_to_map(s: str):
     ret = ""
