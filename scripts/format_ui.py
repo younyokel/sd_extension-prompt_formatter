@@ -97,7 +97,7 @@ def align_commas(prompt: str):
         No need to deal with other types of whitespace, as that's already been dealt.
         """
         return split.strip(" ")
-
+    
     split = re_comma_spacing.split(prompt)
     split = map(strip_spaces, split)
     split = filter(None, split)
@@ -136,7 +136,7 @@ def remove_mismatched_brackets(prompt: str):
 
     return ret
 
-def space_bracekts(prompt: str):
+def space_brakets(prompt: str):
     def helper(match: re.Match):
         # print(' '.join(match.groups()))
         return " ".join(match.groups())
@@ -352,6 +352,67 @@ def escape_bracket_index(token, symbols, start_index=0):
 
     return i
 
+'''
+def dedup_tokens(prompt: str):
+    # Find segments inside angle brackets
+    angle_bracket_parts = re_angle_bracket.findall(prompt)
+    
+    # Remove angle bracket segments for deduplication
+    prompt_without_brackets = re_angle_bracket.sub("", prompt)
+
+    # Deduplicate and preserve order
+    tokens = [token.strip() for token in prompt_without_brackets.split(',')]
+    unique_tokens = list(dict.fromkeys(tokens))
+
+    # Join unique tokens
+    deduped_prompt = ','.join(unique_tokens)
+
+    # Add back angle bracket segments at the end
+    if angle_bracket_parts:
+        deduped_prompt = ','.join([deduped_prompt] + angle_bracket_parts)
+
+    return deduped_prompt
+'''
+def dedup_tokens(prompt: str):
+    # Find segments inside angle brackets
+    angle_bracket_matches = list(re_angle_bracket.finditer(prompt))
+
+    # Separate the prompt into chunks outside and inside angle brackets
+    segments = []
+    previous_position = 0
+
+    for match in angle_bracket_matches:
+        start, end = match.span()
+        # Everything before the bracketed segment
+        segments.append(prompt[previous_position:start])
+        # The bracketed segment
+        segments.append(prompt[start:end])
+        previous_position = end
+
+    # Add the last unbracketed segment, if any
+    if previous_position < len(prompt):
+        segments.append(prompt[previous_position:])
+
+    # Deduplicate unbracketed segments
+    unique_segments = []
+
+    for segment in segments:
+        if re_angle_bracket.match(segment):
+            unique_segments.append(segment)  # Keep bracketed segments as is
+        else:
+            # Deduplicate and preserve order
+            tokens = [token.strip() for token in segment.split(',')]
+            unique_tokens = list(dict.fromkeys(tokens))  # Deduplicate
+            unique_segment = ','.join(unique_tokens)
+            unique_segments.append(unique_segment)
+
+    # Join all segments to reconstruct the prompt
+    prompt = ''.join(unique_segments)
+    prompt = re.sub(r'(<)', r' \1', prompt)
+    prompt = re.sub(r'(>)(?!,)', r'\1 ', prompt)
+
+    return prompt
+
 def format_prompt(*prompts: list):
     sync_settings()
 
@@ -366,12 +427,15 @@ def format_prompt(*prompts: list):
         prompt = normalize_characters(prompt)
         prompt = remove_mismatched_brackets(prompt)
 
+        # Remove dups
+        prompt = dedup_tokens(prompt)
+
         # Clean up whitespace for cool beans
         prompt = remove_whitespace_excessive(prompt)
         prompt = space_to_underscore(prompt)
         prompt = align_brackets(prompt)
         prompt = space_and(prompt)  # for proper compositing alignment on colons
-        prompt = space_bracekts(prompt)
+        prompt = space_brakets(prompt)
         prompt = align_colons(prompt)
         prompt = align_commas(prompt)
         prompt = align_alternating(prompt)
