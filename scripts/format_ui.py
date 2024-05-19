@@ -18,6 +18,7 @@ brackets_opening = "([{<"
 brackets_closing = ")]}>"
 re_angle_bracket = re.compile(r"<[^>]+>")
 re_whitespace = re.compile(r"[^\S\r\n]+")  # excludes new lines
+re_multiple_linebreaks = re.compile(r"\n\s*\n+")
 re_tokenize = re.compile(r",")
 re_comma_spacing = re.compile(r",+")
 re_brackets_fix_whitespace = re.compile(r"([\(\[{<])\s*|\s*([\)\]}>}])")
@@ -59,7 +60,10 @@ def tokenize(data: str) -> list:
     return re_tokenize.split(data)
 
 def remove_whitespace_excessive(prompt: str):
-    return " ".join(re.split(re_whitespace, prompt))
+    prompt = re_multiple_linebreaks.sub("\n", prompt)
+    lines = prompt.split("\n")
+    cleaned_lines = [" ".join(re.split(re_whitespace, line)).strip() for line in lines]
+    return "\n".join(cleaned_lines).strip()
 
 def align_brackets(prompt: str):
     def helper(match: re.Match):
@@ -352,27 +356,6 @@ def escape_bracket_index(token, symbols, start_index=0):
 
     return i
 
-'''
-def dedup_tokens(prompt: str):
-    # Find segments inside angle brackets
-    angle_bracket_parts = re_angle_bracket.findall(prompt)
-    
-    # Remove angle bracket segments for deduplication
-    prompt_without_brackets = re_angle_bracket.sub("", prompt)
-
-    # Deduplicate and preserve order
-    tokens = [token.strip() for token in prompt_without_brackets.split(',')]
-    unique_tokens = list(dict.fromkeys(tokens))
-
-    # Join unique tokens
-    deduped_prompt = ','.join(unique_tokens)
-
-    # Add back angle bracket segments at the end
-    if angle_bracket_parts:
-        deduped_prompt = ','.join([deduped_prompt] + angle_bracket_parts)
-
-    return deduped_prompt
-'''
 def dedup_tokens(prompt: str):
     # Find segments inside angle brackets
     angle_bracket_matches = list(re_angle_bracket.finditer(prompt))
