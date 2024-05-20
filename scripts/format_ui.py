@@ -14,8 +14,8 @@ CONV_SPUND = "None"
 """
 Regex stuff
 """
-brackets_opening = "([{<"
-brackets_closing = ")]}>"
+brackets_opening = "([{"
+brackets_closing = ")]}"
 re_angle_bracket = re.compile(r"<[^>]+>")
 re_whitespace = re.compile(r"[^\S\r\n]+")  # excludes new lines
 re_multiple_linebreaks = re.compile(r"\n\s*\n+")
@@ -251,6 +251,9 @@ def bracket_to_weights(prompt: str):
         final_prompt += segment
         if i < len(excluded_regions):
             final_prompt += prompt[excluded_regions[i][0]:excluded_regions[i][1]]
+
+    # Remove round brackets with weight 1
+    final_prompt = re.sub(r'\(([^:]+):1(?:\.0*)?\)', r'\1', final_prompt)
 
     return final_prompt
 
