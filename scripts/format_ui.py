@@ -253,7 +253,7 @@ def bracket_to_weights(prompt: str):
             final_prompt += prompt[excluded_regions[i][0]:excluded_regions[i][1]]
 
     # Remove round brackets with weight 1
-    final_prompt = re.sub(r'\(([^:]+):1(?:\.0*)?\)', r'\1', final_prompt)
+    final_prompt = re.sub(r'(?<!\\)\(([^:]+):1(?:\.0*)?\)', r'\1', final_prompt)
 
     return final_prompt
 
