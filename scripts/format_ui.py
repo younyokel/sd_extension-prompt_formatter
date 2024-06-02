@@ -386,11 +386,15 @@ def dedup_tokens(prompt: str):
         if re_angle_bracket.match(segment):
             unique_segments.append(segment)  # Keep bracketed segments as is
         else:
-            # Deduplicate and preserve order
-            tokens = [token.strip() for token in segment.split(',')]
-            unique_tokens = list(dict.fromkeys(tokens))  # Deduplicate
-            unique_segment = ','.join(unique_tokens)
-            unique_segments.append(unique_segment)
+            # Deduplicate and preserve order, maintaining line breaks
+            lines = segment.split('\n')
+            deduplicated_lines = []
+            for line in lines:
+                tokens = [token.strip() for token in line.split(',')]
+                unique_tokens = list(dict.fromkeys(tokens))  # Deduplicate
+                unique_line = ','.join(unique_tokens)
+                deduplicated_lines.append(unique_line)
+            unique_segments.append('\n'.join(deduplicated_lines))
 
     # Join all segments to reconstruct the prompt
     prompt = ''.join(unique_segments)
