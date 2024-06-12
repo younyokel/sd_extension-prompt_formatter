@@ -96,16 +96,16 @@ def align_commas(prompt: str):
         return prompt
 
     def strip_spaces(split: str):
-        """Remove excessie spaces to space properly later.
-
-        No need to deal with other types of whitespace, as that's already been dealt.
-        """
+        """Remove excessive spaces to space properly later."""
         return split.strip(" ")
     
+    # Split the prompt by commas
     split = re_comma_spacing.split(prompt)
     split = map(strip_spaces, split)
     split = filter(None, split)
-    return ", ".join(split)
+    
+    # Join the split parts back together, but do not add a space if the comma is followed by a line break
+    return re.sub(r',\s*(\n)', r',\1', ", ".join(split))
 
 def extract_networks(tokens: list):
     return list(filter(lambda token: re_networks.match(token), tokens))
