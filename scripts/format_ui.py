@@ -140,13 +140,16 @@ def remove_mismatched_brackets(prompt: str):
 
     return ret
 
-def space_brakets(prompt: str):
+def space_brackets(prompt: str):
     def helper(match: re.Match):
-        # print(' '.join(match.groups()))
         return " ".join(match.groups())
 
-    # print(prompt)
-    return re_opposing_brackets.sub(helper, prompt)
+    parts = re.split(r'(<[^>]+>)', prompt)
+    for i in range(len(parts)):
+        if not parts[i].startswith('<'):
+            parts[i] = re_opposing_brackets.sub(helper, parts[i])
+
+    return ''.join(parts)
 
 def align_alternating(prompt: str):
     def helper(match: re.Match):
@@ -425,7 +428,7 @@ def format_prompt(*prompts: list):
         prompt = space_to_underscore(prompt)
         prompt = align_brackets(prompt)
         prompt = space_and(prompt)  # for proper compositing alignment on colons
-        prompt = space_brakets(prompt)
+        prompt = space_brackets(prompt)
         prompt = align_colons(prompt)
         prompt = align_commas(prompt)
         prompt = align_alternating(prompt)
