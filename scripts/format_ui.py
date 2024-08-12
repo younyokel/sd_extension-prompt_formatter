@@ -409,20 +409,9 @@ def dedup_tokens(prompt: str):
 def format_prompt(*prompts: list):
     sync_settings()
 
-    # List of valid elem_id values you want to process
-    valid_ids = ["txt2img_prompt", "txt2img_neg_prompt", "img2img_prompt", "img2img_neg_prompt", "hires_prompt", "hires_neg_prompt"]
-
     ret = []
 
     for prompt in prompts:
-        # Assume prompt is a Gradio component with elem_id, you might need to adjust if it's just text
-        elem_id = getattr(prompt, 'elem_id', None)
-
-        # Filter based on elem_id, if applicable
-        if elem_id and elem_id not in valid_ids:
-            print(f"Ignored prompt with elem_id: {elem_id}")
-            continue
-
         if not prompt or prompt.strip() == "":
             ret.append("")
             continue
@@ -431,7 +420,7 @@ def format_prompt(*prompts: list):
         prompt = normalize_characters(prompt)
         prompt = remove_mismatched_brackets(prompt)
 
-        # Remove duplicates
+        # Remove dups
         prompt = dedup_tokens(prompt)
 
         # Clean up whitespace for cool beans
