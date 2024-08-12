@@ -442,7 +442,7 @@ def on_before_component(component: gr.component, **kwargs: dict):
     if "elem_id" in kwargs:
         elem_id = kwargs["elem_id"]
 
-        if elem_id in ["txt2img_prompt", "txt2img_neg_prompt", "img2img_prompt", "img2img_neg_prompt"]:
+        if elem_id in ["txt2img_prompt", "txt2img_neg_prompt", "img2img_prompt", "img2img_neg_prompt", "hires_prompt", "hires_neg_prompt"]:
             ui_prompts.append(component)
             return None
         elif elem_id == "paste":
