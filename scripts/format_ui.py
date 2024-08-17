@@ -41,7 +41,7 @@ re_existing_weight = re.compile(r"(?<=:)(\d+.?\d*|\d*.?\d+)(?=[)\]]$)")
 """
 References
 """
-ui_prompts = []
+ui_prompts = set()
 
 """
 Functions
@@ -406,12 +406,12 @@ def dedup_tokens(prompt: str):
 
     return prompt
 
-def format_prompt(*prompts: list):
+def format_prompt(*prompts: tuple[dict]):
     sync_settings()
 
     ret = []
 
-    for prompt in prompts:
+    for component, prompt in prompts[0].items():
         if not prompt or prompt.strip() == "":
             ret.append("")
             continue
@@ -439,19 +439,16 @@ def format_prompt(*prompts: list):
     return ret
 
 def on_before_component(component: gr.component, **kwargs: dict):
-    if "elem_id" in kwargs:
-        elem_id = kwargs["elem_id"]
+    elem_id = kwargs.get("elem_id", None)
 
+    if elem_id:
         if elem_id in ["txt2img_prompt", "txt2img_neg_prompt", "img2img_prompt", "img2img_neg_prompt", "hires_prompt", "hires_neg_prompt"]:
-            ui_prompts.append(component)
-            return None
+            ui_prompts.add(component)
         elif elem_id == "paste":
             with gr.Blocks(analytics_enabled=False) as ui_component:
                 button = gr.Button(value="💫", elem_classes="tool", elem_id="format")
                 button.click(fn=format_prompt, inputs=ui_prompts, outputs=ui_prompts)
                 return ui_component
-
-        return None
     return None
 
 def on_ui_settings():
