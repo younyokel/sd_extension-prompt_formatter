@@ -373,38 +373,36 @@ def dedup_tokens(prompt: str):
     for match in angle_bracket_matches:
         start, end = match.span()
         # Everything before the bracketed segment
-        segments.append(prompt[previous_position:start])
+        segments.append(('text', prompt[previous_position:start]))
         # The bracketed segment
-        segments.append(prompt[start:end])
+        segments.append(('bracket', prompt[start:end]))
         previous_position = end
 
     # Add the last unbracketed segment, if any
     if previous_position < len(prompt):
-        segments.append(prompt[previous_position:])
+        segments.append(('text', prompt[previous_position:]))
 
-    # Deduplicate unbracketed segments
-    unique_segments = []
+    # Deduplicate tokens across all text segments
+    all_text = ' '.join([segment[1] for segment in segments if segment[0] == 'text'])
+    tokens = [token.strip() for token in all_text.split(',')]
+    unique_tokens = list(dict.fromkeys(tokens))  # Deduplicate
 
-    for segment in segments:
-        if re_angle_bracket.match(segment):
-            unique_segments.append(segment)  # Keep bracketed segments as is
+    # Reconstruct the prompt
+    result = []
+    for segment_type, segment_text in segments:
+        if segment_type == 'bracket':
+            result.append(segment_text)
         else:
-            # Deduplicate and preserve order, maintaining line breaks
-            lines = segment.split('\n')
-            deduplicated_lines = []
-            for line in lines:
-                tokens = [token.strip() for token in line.split(',')]
-                unique_tokens = list(dict.fromkeys(tokens))  # Deduplicate
-                unique_line = ','.join(unique_tokens)
-                deduplicated_lines.append(unique_line)
-            unique_segments.append('\n'.join(deduplicated_lines))
+            if unique_tokens:
+                result.append(unique_tokens.pop(0))
+                while unique_tokens and not re_angle_bracket.match(unique_tokens[0]):
+                    result.append(', ' + unique_tokens.pop(0))
 
-    # Join all segments to reconstruct the prompt
-    prompt = ''.join(unique_segments)
+    prompt = ' '.join(result)
     prompt = re.sub(r'(<)', r' \1', prompt)
     prompt = re.sub(r'(>)(?!,)', r'\1 ', prompt)
 
-    return prompt
+    return prompt.strip()
 
 def format_prompt(*prompts: tuple[dict]):
     sync_settings()
