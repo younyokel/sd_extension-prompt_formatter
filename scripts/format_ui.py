@@ -14,18 +14,24 @@ CONV_SPUND = "None"
 """
 Regex stuff
 """
-brackets_opening = "([{"
-brackets_closing = ")]}"
+brackets_opening = set("([{")
+brackets_closing = set(")]}")
+bracket_pairs = dict(zip("([{", ")]}"))
+bracket_pairs_reverse = dict(zip(")]}", "([{"))
 re_angle_bracket = re.compile(r"<[^>]+>")
-re_angle_bracket_colon = r'(<[^>]*>|\([^)]*\)|[^<>(]+)'
-re_whitespace = re.compile(r"[^\S\r\n]+")  # excludes new lines
+re_angle_bracket_colon = re.compile(r"(<[^>]*>|\([^)]*\)|[^<>(]+)")
+re_spaces_around_colon = re.compile(r"\s*:\s*")
+re_align_colon = re.compile(r"(\S+)\s*:\s*', r'\1: ")
+re_whitespace = re.compile(r"[^\S\r\n]+")
+re_space_to_underscore = re.compile(r"(?<!BREAK) +(?!BREAK|[^<]*>)")
+re_underscore_to_space = re.compile(r"(?<!BREAK|_)_(?!_|BREAK|[^<]*>)")
 re_multiple_linebreaks = re.compile(r"\n\s*\n+")
 re_tokenize = re.compile(r",")
-re_brackets_fix_whitespace = re.compile(r"([\(\[{<])\s*|\s*([\)\]}>}])")
 re_opposing_brackets = re.compile(r"([)\]}>])([([{<])")
 re_networks = re.compile(r"<.+?>")
 re_bracket_open = re.compile(r"(?<!\\)[([]")
 re_brackets_open = re.compile(r"(?<!\\)(\(+|\[+)")
+re_brackets = re.compile(r'([([{<])|([)\]}>])')
 re_and = re.compile(r"(.*?)\s*(AND)\s*(.*?)")
 re_pipe = re.compile(r"\s*(\|)\s*")
 re_existing_weight = re.compile(r"(?<=:)(\d+.?\d*|\d*.?\d+)(?=[)\]]$)")
@@ -40,10 +46,10 @@ Functions
 """
 
 def get_bracket_closing(c: str):
-    return brackets_closing[brackets_opening.find(c)]
+    return bracket_pairs.get(c, '')
 
 def get_bracket_opening(c: str):
-    return brackets_opening[brackets_closing.find(c)]
+    return bracket_pairs_reverse.get(c, '')
 
 def normalize_characters(data: str):
     return unicodedata.normalize("NFKC", data)
@@ -58,10 +64,7 @@ def remove_whitespace_excessive(prompt: str):
     return "\n".join(cleaned_lines).strip()
 
 def align_brackets(prompt: str):
-    def helper(match: re.Match):
-        return match.group(1) or match.group(2)
-
-    return re_brackets_fix_whitespace.sub(helper, prompt)
+    return re_brackets.sub(lambda m: m.group(1) or m.group(2), prompt)
 
 def space_and(prompt: str):
     def helper(match: re.Match):
@@ -73,8 +76,8 @@ def align_colons(prompt: str):
     def process(match):
         content = match.group(1)
         if content.startswith('<') or content.startswith('('):
-            return re.sub(r'\s*:\s*', ':', content)
-        return re.sub(r'(\S+)\s*:\s*', r'\1: ', content)
+            return re.sub(re_spaces_around_colon, ':', content)
+        return re.sub(re_align_colon, r'\1: ', content)
     
     return re.sub(re_angle_bracket_colon, process, prompt)
 
@@ -88,10 +91,10 @@ def align_commas(prompt: str):
     return re.sub(r'(\s*),\s*(\n)?', replace_comma, prompt.strip())
 
 def extract_networks(tokens: list):
-    return list(filter(lambda token: re_networks.match(token), tokens))
+    return [token for token in tokens if re_networks.match(token)]
 
 def remove_networks(tokens: list):
-    return list(filter(lambda token: not re_networks.match(token), tokens))
+    return [token for token in tokens if not re_networks.match(token)]
 
 def remove_mismatched_brackets(prompt: str):
     stack = []
@@ -106,7 +109,7 @@ def remove_mismatched_brackets(prompt: str):
         elif c in brackets_closing:
             if not stack:
                 continue
-            if stack[-1] == brackets_opening[brackets_closing.index(c)]:
+            if stack[-1] == get_bracket_opening(c):
                 stack.pop()
                 pos.pop()
                 ret += c
@@ -162,7 +165,7 @@ def bracket_to_weights(prompt: str):
         ret = segment
 
         while pos < len(ret):
-            if ret[pos] in "([":
+            if ret[pos] in brackets_opening:
                 open_bracketing = re_brackets_open.match(ret, pos)
                 if open_bracketing:
                     consecutive = len(open_bracketing.group(0))
@@ -240,33 +243,26 @@ def bracket_to_weights(prompt: str):
 
     return final_prompt
 
-def depth_to_map(s: str):
-    ret = ""
+def depth_and_gradient(s: str):
     depth = 0
+    depth_map = []
+    gradient = []
     for c in s:
-        if c in "([":
+        if c in brackets_opening:
             depth += 1
-        if c in ")]":
+            gradient.append('^')
+        elif c in brackets_closing:
             depth -= 1
-        ret += str(depth)
-    return ret
-
-def depth_to_gradeint(s: str):
-    ret = ""
-    for c in s:
-        if c in "([":
-            ret += "^"
-        elif c in ")]":
-            ret += "v"
+            gradient.append('v')
         else:
-            ret += "-"
-    return ret
-
-def filter_brackets(s: str):
-    return "".join(list(map(lambda c: c if c in "[]()" else " ", s)))
+            gradient.append('-')
+        depth_map.append(str(depth))
+    return ''.join(depth_map), ''.join(gradient)
 
 def get_mappings(s: str):
-    return depth_to_map(s), depth_to_gradeint(s), filter_brackets(s)
+    depth_map, gradient = depth_and_gradient(s)
+    brackets = ''.join(c if c in "[]()<>" else " " for c in s)
+    return depth_map, gradient, brackets
 
 def calculate_weight(d: str, is_square_brackets: bool):
     return 1 / 1.1 ** int(d) if is_square_brackets else 1 * 1.1 ** int(d)
@@ -309,38 +305,32 @@ def space_to_underscore(prompt: str):
     if CONV_SPUND == "None":
         return prompt
     elif CONV_SPUND == "Spaces to underscores":
-        match = r"(?<!BREAK) +(?!BREAK|[^<]*>)"
+        match = re_space_to_underscore
         replace = "_"
     else:
-        match = r"(?<!BREAK|_)_(?!_|BREAK|[^<]*>)"
+        match = re_underscore_to_space
         replace = " "
 
     tokens = [t.strip() for t in prompt.split(",")]
-    tokens = map(lambda t: re.sub(match, replace, t), tokens)
+    tokens = [re.sub(match, replace, t) for t in tokens]
 
     return ",".join(tokens)
 
 def escape_bracket_index(token, symbols, start_index=0):
-    # Given a token and a set of open bracket symbols, find the index in which that character
-    # escapes the given bracketing such that depth = 0.
     token_length = len(token)
-    open = symbols
-    close = ""
-    for s in symbols:
-        close += brackets_closing[brackets_opening.index(s)]
-
-    i = start_index
-    d = 0
-    while i < token_length - 1:
-        if token[i] in open:
-            d += 1
-        if token[i] in close:
-            d -= 1
-            if d == 0:
+    open_symbols = set(symbols)
+    close_symbols = set(bracket_pairs[s] for s in symbols if s in bracket_pairs)
+    
+    depth = 0
+    for i in range(start_index, token_length):
+        if token[i] in open_symbols:
+            depth += 1
+        elif token[i] in close_symbols:
+            depth -= 1
+            if depth == 0:
                 return i
-        i += 1
-
-    return i
+    
+    return token_length - 1
 
 def dedup_tokens(prompt: str):
     # Find segments inside angle brackets
