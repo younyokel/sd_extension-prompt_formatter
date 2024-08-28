@@ -17,6 +17,8 @@ Regex stuff
 brackets_opening = "([{"
 brackets_closing = ")]}"
 re_angle_bracket = re.compile(r"<[^>]+>")
+re_angle_bracket_inside = r'<([^>]*)>'
+re_angle_bracket_outside = r'(.*?<[^>]*>|[^<>]+)(?=[^<]*(?:<|$))'
 re_whitespace = re.compile(r"[^\S\r\n]+")  # excludes new lines
 re_multiple_linebreaks = re.compile(r"\n\s*\n+")
 re_tokenize = re.compile(r",")
@@ -26,14 +28,6 @@ re_opposing_brackets = re.compile(r"([)\]}>])([([{<])")
 re_networks = re.compile(r"<.+?>")
 re_bracket_open = re.compile(r"(?<!\\)[([]")
 re_brackets_open = re.compile(r"(?<!\\)(\(+|\[+)")
-re_brackets_closing = re.compile(r"(?<!\\)(\)+|\]+)")
-re_colon_spacing = re.compile(r"\s*(:)\s*")
-re_colon_spacing_composite = re.compile(r"\s*(:)\s*(?=\d*?\.?\d*?\s*?AND)")
-re_colon_spacing_comp_end = re.compile(r"(?<=AND[^:]*?)(:)(?=[^:]*$)")
-re_paren_weights_exist = re.compile(r"\(.*(?<!:):\d.?\d*\)+")
-re_is_prompt_editing = re.compile(r"\[.*:.*\]")
-re_is_prompt_alternating = re.compile(r"\[.*|.*\]")
-re_is_wildcard = re.compile(r"{.*}")
 re_and = re.compile(r"(.*?)\s*(AND)\s*(.*?)")
 re_pipe = re.compile(r"\s*(\|)\s*")
 re_existing_weight = re.compile(r"(?<=:)(\d+.?\d*|\d*.?\d+)(?=[)\]]$)")
@@ -78,18 +72,17 @@ def space_and(prompt: str):
     return re_and.sub(helper, prompt)
 
 def align_colons(prompt: str):
-    def normalize(match: re.Match):
-        return match.group(1)
+    def process_non_bracketed(match):
+        return f"{match.group(1)}: "
 
-    def composite(match: re.Match):
-        return " " + match.group(1)
+    def process_bracketed(match):
+        return match.group(1).replace(" ", "")
 
-    def composite_end(match: re.Match):
-        return " " + match.group(1)
-
-    ret = re_colon_spacing.sub(normalize, prompt)
-    ret = re_colon_spacing_composite.sub(composite, ret)
-    return re_colon_spacing_comp_end.sub(composite_end, ret)
+    # Process text inside angle brackets
+    result = re.sub(re_angle_bracket_outside, lambda m: re.sub(r'(\S+)\s*:\s*', process_non_bracketed, m.group(1)), prompt)
+    result = re.sub(re_angle_bracket_inside, lambda m: '<' + process_bracketed(m) + '>', result)
+    
+    return result
 
 def align_commas(prompt: str):
     if not SPACE_COMMAS:
