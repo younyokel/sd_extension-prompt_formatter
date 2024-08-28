@@ -73,7 +73,7 @@ def align_colons(prompt: str):
     def process(match):
         content = match.group(1)
         if content.startswith('<') or content.startswith('('):
-            return content.replace(' ', '')
+            return re.sub(r'\s*:\s*', ':', content)
         return re.sub(r'(\S+)\s*:\s*', r'\1: ', content)
     
     return re.sub(re_angle_bracket_colon, process, prompt)
