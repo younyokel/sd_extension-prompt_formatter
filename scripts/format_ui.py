@@ -17,12 +17,10 @@ Regex stuff
 brackets_opening = "([{"
 brackets_closing = ")]}"
 re_angle_bracket = re.compile(r"<[^>]+>")
-re_angle_bracket_inside = r'<([^>]*)>'
-re_angle_bracket_outside = r'(.*?<[^>]*>|[^<>]+)(?=[^<]*(?:<|$))'
+re_angle_bracket_colon = r'(<[^>]*>|\([^)]*\)|[^<>(]+)'
 re_whitespace = re.compile(r"[^\S\r\n]+")  # excludes new lines
 re_multiple_linebreaks = re.compile(r"\n\s*\n+")
 re_tokenize = re.compile(r",")
-re_comma_spacing = re.compile(r",+")
 re_brackets_fix_whitespace = re.compile(r"([\(\[{<])\s*|\s*([\)\]}>}])")
 re_opposing_brackets = re.compile(r"([)\]}>])([([{<])")
 re_networks = re.compile(r"<.+?>")
@@ -72,33 +70,22 @@ def space_and(prompt: str):
     return re_and.sub(helper, prompt)
 
 def align_colons(prompt: str):
-    def process_non_bracketed(match):
-        return f"{match.group(1)}: "
-
-    def process_bracketed(match):
-        return match.group(1).replace(" ", "")
-
-    # Process text inside angle brackets
-    result = re.sub(re_angle_bracket_outside, lambda m: re.sub(r'(\S+)\s*:\s*', process_non_bracketed, m.group(1)), prompt)
-    result = re.sub(re_angle_bracket_inside, lambda m: '<' + process_bracketed(m) + '>', result)
+    def process(match):
+        content = match.group(1)
+        if content.startswith('<') or content.startswith('('):
+            return content.replace(' ', '')
+        return re.sub(r'(\S+)\s*:\s*', r'\1: ', content)
     
-    return result
+    return re.sub(re_angle_bracket_colon, process, prompt)
 
 def align_commas(prompt: str):
     if not SPACE_COMMAS:
         return prompt
 
-    def strip_spaces(split: str):
-        """Remove excessive spaces to space properly later."""
-        return split.strip(" ")
-    
-    # Split the prompt by commas
-    split = re_comma_spacing.split(prompt)
-    split = map(strip_spaces, split)
-    split = filter(None, split)
-    
-    # Join the split parts back together, but do not add a space if the comma is followed by a line break
-    return re.sub(r',\s*(\n)', r',\1', ", ".join(split))
+    def replace_comma(match):
+        return ',' if match.group(1) else ', '
+
+    return re.sub(r',\s*(\n)?', replace_comma, prompt.strip())
 
 def extract_networks(tokens: list):
     return list(filter(lambda token: re_networks.match(token), tokens))
