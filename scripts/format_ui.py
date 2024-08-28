@@ -83,9 +83,9 @@ def align_commas(prompt: str):
         return prompt
 
     def replace_comma(match):
-        return ',' if match.group(1) else ', '
+        return ', ' if not match.group(2) else ','
 
-    return re.sub(r',\s*(\n)?', replace_comma, prompt.strip())
+    return re.sub(r'(\s*),\s*(\n)?', replace_comma, prompt.strip())
 
 def extract_networks(tokens: list):
     return list(filter(lambda token: re_networks.match(token), tokens))
