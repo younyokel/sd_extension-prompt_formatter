@@ -84,11 +84,8 @@ def align_colons(prompt: str):
 def align_commas(prompt: str):
     if not SPACE_COMMAS:
         return prompt
-
-    def replace_comma(match):
-        return ', ' if not match.group(2) else ','
-
-    return re.sub(r'(\s*),\s*(\n)?', replace_comma, prompt.strip())
+    
+    return re.sub(r'^,\s*|\s*,$', '', re.sub(r'\s*,\s*,+\s*', ', ', prompt.strip()))
 
 def extract_networks(tokens: list):
     return [token for token in tokens if re_networks.match(token)]
