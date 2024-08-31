@@ -19,22 +19,8 @@ brackets_closing = set(")]}")
 bracket_pairs = dict(zip("([{", ")]}"))
 bracket_pairs_reverse = dict(zip(")]}", "([{"))
 re_angle_bracket = re.compile(r"<[^>]+>")
-re_angle_bracket_colon = re.compile(r"(<[^>]*>|\([^)]*\)|[^<>(]+)")
-re_spaces_around_colon = re.compile(r"\s*:\s*")
-re_align_colon = re.compile(r"(\S+)\s*:\s*', r'\1: ")
-re_whitespace = re.compile(r"[^\S\r\n]+")
-re_space_to_underscore = re.compile(r"(?<!BREAK) +(?!BREAK|[^<]*>)")
-re_underscore_to_space = re.compile(r"(?<!BREAK|_)_(?!_|BREAK|[^<]*>)")
-re_multiple_linebreaks = re.compile(r"\n\s*\n+")
-re_tokenize = re.compile(r",")
-re_opposing_brackets = re.compile(r"([)\]}>])([([{<])")
 re_networks = re.compile(r"<.+?>")
-re_bracket_open = re.compile(r"(?<!\\)[([]")
-re_brackets_open = re.compile(r"(?<!\\)(\(+|\[+)")
 re_brackets = re.compile(r'([([{<])|([)\]}>])')
-re_and = re.compile(r"(.*?)\s*(AND)\s*(.*?)")
-re_pipe = re.compile(r"\s*(\|)\s*")
-re_existing_weight = re.compile(r"(?<=:)(\d+.?\d*|\d*.?\d+)(?=[)\]]$)")
 
 """
 References
@@ -55,12 +41,12 @@ def normalize_characters(data: str):
     return unicodedata.normalize("NFKC", data)
 
 def tokenize(data: str) -> list:
-    return re_tokenize.split(data)
+    return re.split(r',', data)
 
 def remove_whitespace_excessive(prompt: str):
-    prompt = re_multiple_linebreaks.sub("\n", prompt)
+    prompt = re.sub(r'\n\s*\n+', "\n", prompt)
     lines = prompt.split("\n")
-    cleaned_lines = [" ".join(re.split(re_whitespace, line)).strip() for line in lines]
+    cleaned_lines = [" ".join(re.split(r'[^\S\r\n]+', line)).strip() for line in lines]
     return "\n".join(cleaned_lines).strip()
 
 def align_brackets(prompt: str):
@@ -70,22 +56,23 @@ def space_and(prompt: str):
     def helper(match: re.Match):
         return " ".join(match.groups())
 
-    return re_and.sub(helper, prompt)
+    return re.sub(r"(.*?)\s*(AND)\s*(.*?)", helper, prompt)
 
 def align_colons(prompt: str):
     def process(match):
         content = match.group(1)
         if content.startswith('<') or content.startswith('('):
-            return re.sub(re_spaces_around_colon, ':', content)
-        return re.sub(re_align_colon, r'\1: ', content)
+            return re.sub(r'\s*:\s*', ':', content)
+        return re.sub(r'(\S+)\s*:\s*', r'\1: ', content)
     
-    return re.sub(re_angle_bracket_colon, process, prompt)
+    return re.sub(r'(<[^>]*>|\([^)]*\)|[^<>(]+)', process, prompt)
 
 def align_commas(prompt: str):
     if not SPACE_COMMAS:
         return prompt
-    
-    return re.sub(r'^,\s*|\s*,$', '', re.sub(r'\s*,\s*,+\s*', ', ', prompt.strip()))
+
+    split = [s.strip() for s in prompt.split(',') if s.strip()]
+    return ", ".join(split)
 
 def extract_networks(tokens: list):
     return [token for token in tokens if re_networks.match(token)]
@@ -127,15 +114,12 @@ def space_brackets(prompt: str):
     parts = re.split(r'(<[^>]+>)', prompt)
     for i in range(len(parts)):
         if not parts[i].startswith('<'):
-            parts[i] = re_opposing_brackets.sub(helper, parts[i])
+            parts[i] = re.sub(r"([)\]}>])([([{<])", helper, parts[i])
 
     return ''.join(parts)
 
 def align_alternating(prompt: str):
-    def helper(match: re.Match):
-        return match.group(1)
-
-    return re_pipe.sub(helper, prompt)
+    return re.sub(r"\s*(\|)\s*", lambda match: match.group(1), prompt)
 
 def bracket_to_weights(prompt: str):
     if not BRACKET2WEIGHT:
@@ -163,7 +147,7 @@ def bracket_to_weights(prompt: str):
 
         while pos < len(ret):
             if ret[pos] in brackets_opening:
-                open_bracketing = re_brackets_open.match(ret, pos)
+                open_bracketing = re.match(r"(?<!\\)(\(+|\[+)", ret, pos)
                 if open_bracketing:
                     consecutive = len(open_bracketing.group(0))
                     gradient_search = "".join(
@@ -192,7 +176,8 @@ def bracket_to_weights(prompt: str):
 
                     if weight:
                         # If weight already exists, ignore
-                        current_weight = re_existing_weight.search(
+                        current_weight = re.search(
+                            r"(?<=:)(\d+.?\d*|\d*.?\d+)(?=[)\]]$)",
                             ret[:insert_at + 1]
                         )
                         if current_weight:
@@ -220,7 +205,7 @@ def bracket_to_weights(prompt: str):
                     depths, gradients, brackets = get_mappings(ret)
                     pos += 1
 
-            match = re_bracket_open.search(ret, pos)
+            match = re.search(r"(?<!\\)[([]", ret, pos)
 
             if not match:  # no more potential weight brackets to parse
                 break
@@ -302,10 +287,10 @@ def space_to_underscore(prompt: str):
     if CONV_SPUND == "None":
         return prompt
     elif CONV_SPUND == "Spaces to underscores":
-        match = re_space_to_underscore
+        match = re.compile(r"(?<!BREAK) +(?!BREAK|[^<]*>)")
         replace = "_"
     else:
-        match = re_underscore_to_space
+        match = re.compile(r"(?<!BREAK|_)_(?!_|BREAK|[^<]*>)")
         replace = " "
 
     tokens = [t.strip() for t in prompt.split(",")]
