@@ -21,6 +21,7 @@ bracket_pairs_reverse = dict(zip(")]}", "([{"))
 re_angle_bracket = re.compile(r"<[^>]+>")
 re_networks = re.compile(r"<.+?>")
 re_brackets = re.compile(r'([([{<])|([)\]}>])')
+re_brackets_open = re.compile(r"(?<!\\)(\(+|\[+)")
 
 """
 References
@@ -147,7 +148,7 @@ def bracket_to_weights(prompt: str):
 
         while pos < len(ret):
             if ret[pos] in brackets_opening:
-                open_bracketing = re.match(r"(?<!\\)(\(+|\[+)", ret, pos)
+                open_bracketing = re_brackets_open.match(ret, pos)
                 if open_bracketing:
                     consecutive = len(open_bracketing.group(0))
                     gradient_search = "".join(
@@ -205,7 +206,7 @@ def bracket_to_weights(prompt: str):
                     depths, gradients, brackets = get_mappings(ret)
                     pos += 1
 
-            match = re.search(r"(?<!\\)[([]", ret, pos)
+            match = re.search(r"(?<!\\)[([]", ret[pos:])
 
             if not match:  # no more potential weight brackets to parse
                 break
