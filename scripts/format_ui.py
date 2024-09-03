@@ -211,7 +211,7 @@ def bracket_to_weights(prompt: str):
             if not match:  # no more potential weight brackets to parse
                 break
 
-            pos = match.start()
+            pos += match.start()
         updated_segments.append(ret)
 
     # Reassemble the final prompt with the excluded regions
