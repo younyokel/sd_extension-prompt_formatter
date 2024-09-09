@@ -27,6 +27,7 @@ re_brackets_open = re.compile(r"(?<!\\)(\(+|\[+)")
 References
 """
 ui_prompts = set()
+previous_prompts = {}
 
 """
 Functions
@@ -398,6 +399,8 @@ def format_prompt(*prompts: tuple[dict]):
     return ret
 
 def convert_tags(*prompts: tuple[dict]):
+    global previous_prompts
+    previous_prompts = prompts[0].copy()
     converted_prompts = []
 
     for component, prompt in prompts[0].items():
@@ -405,7 +408,6 @@ def convert_tags(*prompts: tuple[dict]):
             converted_prompts.append("")
             continue
 
-        # Replace underscores with spaces, escape round brackets, and join with commas
         normal_tags = ", ".join(
             tag.replace("_", " ").replace("(", r"\(").replace(")", r"\)")
             for tag in prompt.strip().split()
@@ -414,6 +416,11 @@ def convert_tags(*prompts: tuple[dict]):
         converted_prompts.append(normal_tags)
 
     return converted_prompts
+
+def undo_convert():
+    if previous_prompts:
+        return [previous_prompts[key] for key in previous_prompts]
+    return [""]*len(ui_prompts)
 
 def on_before_component(component: gr.component, **kwargs: dict):
     elem_id = kwargs.get("elem_id", None)
@@ -428,6 +435,9 @@ def on_before_component(component: gr.component, **kwargs: dict):
 
                 convert_button = gr.Button(value="✒️", elem_classes="tool", elem_id="convert_tags", tooltip="Convert Danbooru tags to comma-separated format")
                 convert_button.click(fn=convert_tags, inputs=ui_prompts, outputs=ui_prompts)
+
+                undo_button = gr.Button(value="↩️", elem_classes="tool", elem_id="undo_convert", tooltip="Undo last Danbooru conversion")
+                undo_button.click(fn=undo_convert, inputs=None, outputs=ui_prompts)
 
                 return ui_component
     return None
