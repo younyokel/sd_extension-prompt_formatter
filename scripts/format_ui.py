@@ -357,6 +357,12 @@ def dedup_tokens(prompt: str):
 
     return prompt.strip()
 
+def comma_after_bracket(prompt: str):
+    return re.sub(r'(>)(\s*)([a-zA-Z])', r'\1,\2\3', prompt)
+
+def comma_before_bracket(prompt: str):
+    return re.sub(r',\s*(<)', r' \1', prompt)
+
 def format_prompt(*prompts: tuple[dict]):
     sync_settings()
 
@@ -370,6 +376,7 @@ def format_prompt(*prompts: tuple[dict]):
         # Clean up the string
         prompt = normalize_characters(prompt)
         prompt = remove_mismatched_brackets(prompt)
+        prompt = comma_after_bracket(prompt)
 
         # Remove dups
         prompt = dedup_tokens(prompt)
@@ -384,10 +391,29 @@ def format_prompt(*prompts: tuple[dict]):
         prompt = align_commas(prompt)
         prompt = align_alternating(prompt)
         prompt = bracket_to_weights(prompt)
+        prompt = comma_before_bracket(prompt)
 
         ret.append(prompt)
 
     return ret
+
+def convert_tags(*prompts: tuple[dict]):
+    converted_prompts = []
+
+    for component, prompt in prompts[0].items():
+        if not prompt or prompt.strip() == "":
+            converted_prompts.append("")
+            continue
+
+        # Replace underscores with spaces, escape round brackets, and join with commas
+        normal_tags = ", ".join(
+            tag.replace("_", " ").replace("(", r"\(").replace(")", r"\)")
+            for tag in prompt.strip().split()
+        )
+
+        converted_prompts.append(normal_tags)
+
+    return converted_prompts
 
 def on_before_component(component: gr.component, **kwargs: dict):
     elem_id = kwargs.get("elem_id", None)
@@ -397,8 +423,12 @@ def on_before_component(component: gr.component, **kwargs: dict):
             ui_prompts.add(component)
         elif elem_id == "paste":
             with gr.Blocks(analytics_enabled=False) as ui_component:
-                button = gr.Button(value="💫", elem_classes="tool", elem_id="format")
-                button.click(fn=format_prompt, inputs=ui_prompts, outputs=ui_prompts)
+                format_button = gr.Button(value="💫", elem_classes="tool", elem_id="format", tooltip="Format and clean up the prompt")
+                format_button.click(fn=format_prompt, inputs=ui_prompts, outputs=ui_prompts)
+
+                convert_button = gr.Button(value="✒️", elem_classes="tool", elem_id="convert_tags", tooltip="Convert Danbooru tags to comma-separated format")
+                convert_button.click(fn=convert_tags, inputs=ui_prompts, outputs=ui_prompts)
+
                 return ui_component
     return None
 
