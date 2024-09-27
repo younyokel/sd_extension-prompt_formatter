@@ -60,15 +60,6 @@ def space_and(prompt: str):
 
     return re.sub(r"(.*?)\s*(AND)\s*(.*?)", helper, prompt)
 
-def align_colons(prompt: str):
-    def process(match):
-        content = match.group(1)
-        if content.startswith('<') or content.startswith('('):
-            return re.sub(r'\s*:\s*', ':', content)
-        return re.sub(r'(\S+)\s*:\s*', r'\1: ', content)
-    
-    return re.sub(r'(<[^>]*>|\([^)]*\)|[^<>(]+)', process, prompt)
-
 def align_commas(prompt: str):
     if not SPACE_COMMAS:
         return prompt
@@ -388,7 +379,6 @@ def format_prompt(*prompts: tuple[dict]):
         prompt = align_brackets(prompt)
         prompt = space_and(prompt)  # for proper compositing alignment on colons
         prompt = space_brackets(prompt)
-        prompt = align_colons(prompt)
         prompt = align_commas(prompt)
         prompt = align_alternating(prompt)
         prompt = bracket_to_weights(prompt)
