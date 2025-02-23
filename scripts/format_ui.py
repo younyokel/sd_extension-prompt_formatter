@@ -1,5 +1,4 @@
 import unicodedata
-
 import gradio as gr
 import regex as re
 from modules import script_callbacks, scripts, shared
@@ -9,7 +8,7 @@ Formatting settings
 """
 SPACE_COMMAS = True
 BRACKET2WEIGHT = True
-CONV_SPUND = "None"
+CONV_SPACE_UNDERSCORE = "None"
 
 """
 Regex stuff
@@ -277,12 +276,12 @@ def get_weight(
     raise Exception(msg)
 
 def space_to_underscore(prompt: str):
-    if CONV_SPUND == "None":
+    if CONV_SPACE_UNDERSCORE == "None":
         return prompt
-    elif CONV_SPUND == "Spaces to underscores":
+    elif CONV_SPACE_UNDERSCORE == "Spaces to underscores":
         match = re.compile(r"(?<!BREAK) +(?!BREAK|[^<]*>)")
         replace = "_"
-    else:
+    elif CONV_SPACE_UNDERSCORE == "Underscores to spaces":
         match = re.compile(r"(?<!BREAK|_)_(?!_|BREAK|[^<]*>)")
         replace = " "
 
@@ -307,47 +306,55 @@ def escape_bracket_index(token, symbols, start_index=0):
     
     return token_length - 1
 
-def dedup_tokens(prompt: str):
-    # Find segments inside angle brackets
-    angle_bracket_matches = list(re_angle_bracket.finditer(prompt))
+def dedupe_tokens(prompt: str) -> str:
+    # Define separators and bracket patterns
+    separators = [',', r'\s*BREAK\s*', r'<[^>]+>']  # Ensure "BREAK" is treated properly
+    bracket_pattern = r'(?<!\\)(\([^)]*\)|\[[^\]]*\])'  # Match (content) or [content], but ignore escaped brackets
 
-    # Separate the prompt into chunks outside and inside angle brackets
-    segments = []
-    previous_position = 0
+    # Create a regex pattern that captures both separators and bracketed expressions
+    pattern = f'({bracket_pattern}|{"|".join(separators)})'
 
-    for match in angle_bracket_matches:
-        start, end = match.span()
-        # Everything before the bracketed segment
-        segments.append(('text', prompt[previous_position:start]))
-        # The bracketed segment
-        segments.append(('bracket', prompt[start:end]))
-        previous_position = end
+    # Preserve line breaks by splitting on them first
+    lines = prompt.splitlines()
+    processed_lines = []
 
-    # Add the last unbracketed segment, if any
-    if previous_position < len(prompt):
-        segments.append(('text', prompt[previous_position:]))
+    for line in lines:
+        # Split the line while keeping separators and bracketed expressions
+        parts = [p for p in re.split(pattern, line) if p is not None]  # Filter out None values
 
-    # Deduplicate tokens across all text segments
-    all_text = ' '.join([segment[1] for segment in segments if segment[0] == 'text'])
-    tokens = [token.strip() for token in all_text.split(',')]
-    unique_tokens = list(dict.fromkeys(tokens))  # Deduplicate
+        seen = set()
+        result = []
 
-    # Reconstruct the prompt
-    result = []
-    for segment_type, segment_text in segments:
-        if segment_type == 'bracket':
-            result.append(segment_text)
-        else:
-            if unique_tokens:
-                result.append(unique_tokens.pop(0))
-                while unique_tokens and not re_angle_bracket.match(unique_tokens[0]):
-                    result.append(', ' + unique_tokens.pop(0))
+        for part in parts:
+            if part is None:
+                continue  # Skip any None values (extra safety)
 
-    prompt = ' '.join(result)
-    prompt = re.sub(r'(<)', r' \1', prompt)
-    prompt = re.sub(r'(>)(?!,)', r'\1 ', prompt)
+            normalized = part.strip()
 
-    return prompt.strip()
+            # Always keep separators
+            if re.fullmatch('|'.join(separators), part):
+                result.append(part.strip())  # Trim spaces around separators
+            # Keep bracketed expressions as whole tokens but dedupe them
+            elif re.fullmatch(bracket_pattern, part):
+                if part not in seen:
+                    seen.add(part)
+                    result.append(part)
+            # Dedupe regular words (ignore empty tokens)
+            elif normalized and normalized not in seen:
+                seen.add(normalized)
+                result.append(part)
+
+        # Use '' instead of ' ' to join, avoiding extra spaces messing up underscores
+        output = ''.join(result)
+
+        # Ensure spaces around "BREAK" and "<...>"
+        output = re.sub(r'(?<!\s)(BREAK|<[^>]+>)(?!\s)', r' \1 ', output)
+
+        # Normalize spaces (trim and collapse excessive spaces)
+        processed_lines.append(' '.join(output.split()))
+
+    # Preserve line breaks between lines, ensuring no excess blank lines
+    return '\n'.join(processed_lines).strip()
 
 def comma_after_bracket(prompt: str):
     return re.sub(r'(>)(\s*)([a-zA-Z])', r'\1,\2\3', prompt)
@@ -359,7 +366,7 @@ def format_prompt(*prompts: tuple[dict]):
     sync_settings()
 
     ret = []
-
+    
     for component, prompt in prompts[0].items():
         if not prompt or prompt.strip() == "":
             ret.append("")
@@ -368,16 +375,15 @@ def format_prompt(*prompts: tuple[dict]):
         # Clean up the string
         prompt = normalize_characters(prompt)
         prompt = remove_mismatched_brackets(prompt)
-        prompt = comma_after_bracket(prompt)
 
-        # Remove dups
-        prompt = dedup_tokens(prompt)
+        # Remove duplicates
+        prompt = dedupe_tokens(prompt)
 
         # Clean up whitespace for cool beans
         prompt = remove_whitespace_excessive(prompt)
         prompt = space_to_underscore(prompt)
         prompt = align_brackets(prompt)
-        prompt = space_and(prompt)  # for proper compositing alignment on colons
+        prompt = space_and(prompt) # for proper compositing alignment on colons
         prompt = space_brackets(prompt)
         prompt = align_commas(prompt)
         prompt = align_alternating(prompt)
@@ -445,7 +451,7 @@ def on_ui_settings():
         ),
     )
     shared.opts.add_option(
-        "pfromat_bracket2weight",
+        "pformat_bracket2weight",
         shared.OptionInfo(
             True,
             "Convert excessive brackets to weights",
@@ -455,7 +461,7 @@ def on_ui_settings():
         ),
     )
     shared.opts.add_option(
-        "pfromat_convert_space_underscore",
+        "pformat_convert_space_underscore",
         shared.OptionInfo(
             "None",
             "Space/underscore convert handling",
@@ -468,10 +474,10 @@ def on_ui_settings():
     sync_settings()
 
 def sync_settings():
-    global SPACE_COMMAS, BRACKET2WEIGHT, CONV_SPUND
+    global SPACE_COMMAS, BRACKET2WEIGHT, CONV_SPACE_UNDERSCORE
     SPACE_COMMAS = shared.opts.pformat_space_commas
-    BRACKET2WEIGHT = shared.opts.pfromat_bracket2weight
-    CONV_SPUND = shared.opts.pfromat_convert_space_underscore
+    BRACKET2WEIGHT = shared.opts.pformat_bracket2weight
+    CONV_SPACE_UNDERSCORE = shared.opts.pformat_convert_space_underscore
 
 script_callbacks.on_before_component(on_before_component)
 script_callbacks.on_ui_settings(on_ui_settings)
