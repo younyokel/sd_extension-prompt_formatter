@@ -4,29 +4,29 @@ import regex as re
 from modules import script_callbacks, scripts, shared
 
 """
-Formatting settings
+Variables
 """
-SPACE_COMMAS = True
-BRACKET2WEIGHT = True
-CONV_SPACE_UNDERSCORE = "None"
 
-"""
-Regex stuff
-"""
+# Formatting control flags
+SPACE_COMMAS = True             # Whether to add spaces after commas
+BRACKET2WEIGHT = True           # Whether to convert multiple brackets to weights
+CONV_SPACE_UNDERSCORE = "None"  # Controls space/underscore conversion mode
+
+# UI prompt storage
+ui_prompts = set()              # Stores the UI prompts for processing
+previous_prompts = {}           # Store previous prompts for undoing
+
+# Bracket handling
 brackets_opening = set("([{")
 brackets_closing = set(")]}")
 bracket_pairs = dict(zip("([{", ")]}"))
 bracket_pairs_reverse = dict(zip(")]}", "([{"))
+
+# Regular expression patterns
 re_angle_bracket = re.compile(r"<[^>]+>")
 re_networks = re.compile(r"<.+?>")
 re_brackets = re.compile(r'([([{<])|([)\]}>])')
 re_brackets_open = re.compile(r"(?<!\\)(\(+|\[+)")
-
-"""
-References
-"""
-ui_prompts = set()
-previous_prompts = {}
 
 """
 Functions
@@ -363,8 +363,10 @@ def comma_before_bracket(prompt: str):
     return re.sub(r',\s*(<)', r' \1', prompt)
 
 def format_prompt(*prompts: tuple[dict]):
-    sync_settings()
+    global previous_prompts
+    previous_prompts = prompts[0].copy()  # Save state before modifications
 
+    sync_settings()
     ret = []
     
     for component, prompt in prompts[0].items():
@@ -395,22 +397,51 @@ def format_prompt(*prompts: tuple[dict]):
     return ret
 
 def convert_tags(*prompts: tuple[dict]):
-    global previous_prompts
-    previous_prompts = prompts[0].copy()
+    def process_line(line: str) -> str:
+        # Skip empty lines, preserve them as is
+        if not line or line.strip() == "":
+            return line
+            
+        # Skip lines containing 'BREAK'
+        if "BREAK" in line:
+            return line
+            
+        # Skip lines with commas
+        if "," in line:
+            return line
+            
+        # Skip lines with brackets but no underscores
+        if ("(" in line or ")" in line) and "_" not in line:
+            return line
+            
+        # Process tags
+        tags = re.split(r'\s+', line.strip())
+        converted = []
+        
+        for tag in tags:
+            # Replace underscores with spaces
+            tag = tag.replace("_", " ")
+            # Handle escaped brackets
+            tag = re.sub(r'\\?\(', r'\(', tag)
+            tag = re.sub(r'\\?\)', r'\)', tag)
+            converted.append(tag)
+            
+        # Join with commas and handle newlines
+        result = ", ".join(converted)
+        
+        # Add comma only if not the last line and doesn't already end with comma
+        if line.endswith("\n") and not result.endswith(","):
+            result += ","
+        
+        return result + ("\n" if line.endswith("\n") else "")
+
     converted_prompts = []
-
+    
     for component, prompt in prompts[0].items():
-        if not prompt or prompt.strip() == "":
-            converted_prompts.append("")
-            continue
-
-        normal_tags = ", ".join(
-            tag.replace("_", " ").replace("(", r"\(").replace(")", r"\)")
-            for tag in prompt.strip().split()
-        )
-
-        converted_prompts.append(normal_tags)
-
+        lines = prompt.splitlines(keepends=True)
+        converted_lines = [process_line(line) for line in lines]
+        converted_prompts.append("".join(converted_lines))
+        
     return converted_prompts
 
 def undo_convert():
