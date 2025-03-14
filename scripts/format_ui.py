@@ -11,6 +11,7 @@ Variables
 SPACE_COMMAS = True             # Whether to add spaces after commas
 BRACKET2WEIGHT = True           # Whether to convert multiple brackets to weights
 CONV_SPACE_UNDERSCORE = "None"  # Controls space/underscore conversion mode
+BLACKLISTED_TAGS = []           # Tags to filter out during conversion
 
 # UI prompt storage
 ui_prompts = set()              # Stores the UI prompts for processing
@@ -317,12 +318,14 @@ def dedupe_tokens(prompt: str) -> str:
     # Preserve line breaks by splitting on them first
     lines = prompt.splitlines()
     processed_lines = []
+    
+    # Use a global seen set to track tokens across all lines
+    seen = set()
 
     for line in lines:
         # Split the line while keeping separators and bracketed expressions
         parts = [p for p in re.split(pattern, line) if p is not None]  # Filter out None values
 
-        seen = set()
         result = []
 
         for part in parts:
@@ -333,7 +336,12 @@ def dedupe_tokens(prompt: str) -> str:
 
             # Always keep separators
             if re.fullmatch('|'.join(separators), part):
-                result.append(part.strip())  # Trim spaces around separators
+                if part.strip() == "BREAK":
+                    result.append(" BREAK ")  # Ensure spacing
+                elif re.match(r'<[^>]+>', part):
+                    result.append(f" {part.strip()} ")  # Ensure spacing around <tags>
+                else:
+                    result.append(part.strip())  # Trim spaces around other separators
             # Keep bracketed expressions as whole tokens but dedupe them
             elif re.fullmatch(bracket_pattern, part):
                 if part not in seen:
@@ -344,14 +352,15 @@ def dedupe_tokens(prompt: str) -> str:
                 seen.add(normalized)
                 result.append(part)
 
-        # Use '' instead of ' ' to join, avoiding extra spaces messing up underscores
+        # Join with empty string to preserve intended spacing
         output = ''.join(result)
 
-        # Ensure spaces around "BREAK" and "<...>"
-        output = re.sub(r'(?<!\s)(BREAK|<[^>]+>)(?!\s)', r' \1 ', output)
+        # Ensure spaces around "BREAK"
+        output = re.sub(r'\s*BREAK\s*', r' BREAK ', output).strip()
 
         # Normalize spaces (trim and collapse excessive spaces)
-        processed_lines.append(' '.join(output.split()))
+        if output:  # Only add non-empty lines
+            processed_lines.append(' '.join(output.split()))
 
     # Preserve line breaks between lines, ensuring no excess blank lines
     return '\n'.join(processed_lines).strip()
@@ -397,51 +406,47 @@ def format_prompt(*prompts: tuple[dict]):
     return ret
 
 def convert_tags(*prompts: tuple[dict]):
-    def process_line(line: str) -> str:
-        # Skip empty lines, preserve them as is
-        if not line or line.strip() == "":
-            return line
-            
-        # Skip lines containing 'BREAK'
-        if "BREAK" in line:
-            return line
-            
-        # Skip lines with commas
-        if "," in line:
-            return line
-            
-        # Skip lines with brackets but no underscores
-        if ("(" in line or ")" in line) and "_" not in line:
-            return line
-            
-        # Process tags
-        tags = re.split(r'\s+', line.strip())
-        converted = []
-        
-        for tag in tags:
-            # Replace underscores with spaces
-            tag = tag.replace("_", " ")
-            # Handle escaped brackets
-            tag = re.sub(r'\\?\(', r'\(', tag)
-            tag = re.sub(r'\\?\)', r'\)', tag)
-            converted.append(tag)
-            
-        # Join with commas and handle newlines
-        result = ", ".join(converted)
-        
-        # Add comma only if not the last line and doesn't already end with comma
-        if line.endswith("\n") and not result.endswith(","):
-            result += ","
-        
-        return result + ("\n" if line.endswith("\n") else "")
-
+    global previous_prompts
+    previous_prompts = prompts[0].copy()
+    
     converted_prompts = []
     
     for component, prompt in prompts[0].items():
-        lines = prompt.splitlines(keepends=True)
-        converted_lines = [process_line(line) for line in lines]
-        converted_prompts.append("".join(converted_lines))
+        converted_lines = []
         
+        for line in prompt.splitlines(keepends=True):
+            # Skip processing for special cases
+            if (not line.strip() or 
+                "BREAK" in line or 
+                "," in line or 
+                (("(" in line or ")" in line) and "_" not in line)):
+                converted_lines.append(line)
+                continue
+            
+            # Process tags
+            raw_tags = line.strip().split()
+            
+            # Filter out blacklisted tags
+            raw_tags = [tag for tag in raw_tags if tag not in BLACKLISTED_TAGS]
+            
+            # Apply formatting to remaining tags
+            tags = [tag.replace("_", " ")
+                   .replace("\\(", "(")
+                   .replace("\\)", ")")
+                   .replace("(", "\\(")
+                   .replace(")", "\\)") 
+                   for tag in raw_tags]
+            
+            result = ", ".join(tags)
+            
+            # Add comma if needed
+            if line.endswith("\n") and not result.endswith(","):
+                result += ","
+                
+            converted_lines.append(result + ("\n" if line.endswith("\n") else ""))
+        
+        converted_prompts.append("".join(converted_lines))
+    
     return converted_prompts
 
 def undo_convert():
@@ -501,14 +506,25 @@ def on_ui_settings():
             section=section,
         ),
     )
+    shared.opts.add_option(
+        "pformat_blacklisted_tags",
+        shared.OptionInfo(
+            "tagme text english_text japanese_text text_bubble speech_bubble onomatopoeia dialogue",
+            "Blacklisted tags",
+            gr.Textbox,
+            {"interactive": True},
+            section=section,
+        ).info("space-separated; will be filtered out on tag conversion"),
+    )
 
     sync_settings()
 
 def sync_settings():
-    global SPACE_COMMAS, BRACKET2WEIGHT, CONV_SPACE_UNDERSCORE
+    global SPACE_COMMAS, BRACKET2WEIGHT, CONV_SPACE_UNDERSCORE, BLACKLISTED_TAGS
     SPACE_COMMAS = shared.opts.pformat_space_commas
     BRACKET2WEIGHT = shared.opts.pformat_bracket2weight
     CONV_SPACE_UNDERSCORE = shared.opts.pformat_convert_space_underscore
+    BLACKLISTED_TAGS = [tag for tag in shared.opts.pformat_blacklisted_tags.split() if tag]
 
 script_callbacks.on_before_component(on_before_component)
 script_callbacks.on_ui_settings(on_ui_settings)
