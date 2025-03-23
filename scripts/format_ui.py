@@ -25,7 +25,6 @@ bracket_pairs_reverse = dict(zip(")]}", "([{"))
 
 # Regular expression patterns
 re_angle_bracket = re.compile(r"<[^>]+>")
-re_networks = re.compile(r"<.+?>")
 re_brackets = re.compile(r'([([{<])|([)\]}>])')
 re_brackets_open = re.compile(r"(?<!\\)(\(+|\[+)")
 
@@ -33,17 +32,11 @@ re_brackets_open = re.compile(r"(?<!\\)(\(+|\[+)")
 Functions
 """
 
-def get_bracket_closing(c: str):
-    return bracket_pairs.get(c, '')
-
 def get_bracket_opening(c: str):
     return bracket_pairs_reverse.get(c, '')
 
 def normalize_characters(data: str):
     return unicodedata.normalize("NFKC", data)
-
-def tokenize(data: str) -> list:
-    return re.split(r',', data)
 
 def remove_whitespace_excessive(prompt: str):
     prompt = re.sub(r'\n\s*\n+', "\n", prompt)
@@ -66,12 +59,6 @@ def align_commas(prompt: str):
 
     split = [s.strip() for s in prompt.split(',') if s.strip()]
     return ", ".join(split)
-
-def extract_networks(tokens: list):
-    return [token for token in tokens if re_networks.match(token)]
-
-def remove_networks(tokens: list):
-    return [token for token in tokens if not re_networks.match(token)]
 
 def remove_mismatched_brackets(prompt: str):
     stack = []
@@ -291,22 +278,6 @@ def space_to_underscore(prompt: str):
 
     return ",".join(tokens)
 
-def escape_bracket_index(token, symbols, start_index=0):
-    token_length = len(token)
-    open_symbols = set(symbols)
-    close_symbols = set(bracket_pairs[s] for s in symbols if s in bracket_pairs)
-    
-    depth = 0
-    for i in range(start_index, token_length):
-        if token[i] in open_symbols:
-            depth += 1
-        elif token[i] in close_symbols:
-            depth -= 1
-            if depth == 0:
-                return i
-    
-    return token_length - 1
-
 def dedupe_tokens(prompt: str) -> str:
     # Define separators and bracket patterns
     separators = [',', r'\s*BREAK\s*', r'<[^>]+>']  # Ensure "BREAK" is treated properly
@@ -365,11 +336,32 @@ def dedupe_tokens(prompt: str) -> str:
     # Preserve line breaks between lines, ensuring no excess blank lines
     return '\n'.join(processed_lines).strip()
 
-def comma_after_bracket(prompt: str):
-    return re.sub(r'(>)(\s*)([a-zA-Z])', r'\1,\2\3', prompt)
-
 def comma_before_bracket(prompt: str):
     return re.sub(r',\s*(<)', r' \1', prompt)
+
+def extra_networks_shift(prompt: str):
+    def match(m):
+        # Extract the network tag and the content following it
+        network, content = m.groups()
+        
+        sep_match = re.search(r'(\n|BREAK)', content)
+        
+        if sep_match:
+            # If a separator is found, split the content into activation and the rest
+            sep_pos = sep_match.start()
+            activation = content[:sep_pos].strip().rstrip(',')
+            rest = content[sep_pos:]
+        else:
+            # If no separator, treat the entire content as activation
+            activation = content.strip().rstrip(',')
+            rest = ''
+        
+        # If activation exists and does not contain a comma, prepend it to the network tag
+        if activation and ',' not in activation:
+            return f', {activation} {network}{rest}'
+        return f'{network}{content}'
+    
+    return re.sub(r'(<[^>]+>)([^<]*)', match, prompt)
 
 def format_prompt(*prompts: tuple[dict]):
     global previous_prompts
@@ -379,13 +371,14 @@ def format_prompt(*prompts: tuple[dict]):
     ret = []
     
     for component, prompt in prompts[0].items():
-        if not prompt or prompt.strip() == "":
+        if not prompt.strip():
             ret.append("")
             continue
 
         # Clean up the string
         prompt = normalize_characters(prompt)
         prompt = remove_mismatched_brackets(prompt)
+        prompt = extra_networks_shift(prompt)
 
         # Remove duplicates
         prompt = dedupe_tokens(prompt)
@@ -426,8 +419,9 @@ def convert_tags(*prompts: tuple[dict]):
             # Process tags
             raw_tags = line.strip().split()
             
-            # Filter out blacklisted tags
-            raw_tags = [tag for tag in raw_tags if tag not in BLACKLISTED_TAGS]
+            # Filter out blacklisted tags using regex
+            raw_tags = [tag for tag in raw_tags 
+                        if not any(pattern.fullmatch(tag) for pattern in BLACKLISTED_TAGS)]
             
             # Apply formatting to remaining tags
             tags = [tag.replace("_", " ")
@@ -444,7 +438,7 @@ def convert_tags(*prompts: tuple[dict]):
                 result += ","
                 
             converted_lines.append(result + ("\n" if line.endswith("\n") else ""))
-        
+
         converted_prompts.append("".join(converted_lines))
     
     return converted_prompts
@@ -509,12 +503,12 @@ def on_ui_settings():
     shared.opts.add_option(
         "pformat_blacklisted_tags",
         shared.OptionInfo(
-            "tagme text english_text japanese_text text_bubble speech_bubble onomatopoeia dialogue",
+            "tagme text english_text japanese_text text_bubble speech_bubble onomatopoeia dialogue 20\d\d",
             "Blacklisted tags",
             gr.Textbox,
             {"interactive": True},
             section=section,
-        ).info("space-separated; will be filtered out on tag conversion"),
+        ).info("space-separated; will be filtered out on tag conversion. Supports regex."),
     )
 
     sync_settings()
@@ -524,7 +518,7 @@ def sync_settings():
     SPACE_COMMAS = shared.opts.pformat_space_commas
     BRACKET2WEIGHT = shared.opts.pformat_bracket2weight
     CONV_SPACE_UNDERSCORE = shared.opts.pformat_convert_space_underscore
-    BLACKLISTED_TAGS = [tag for tag in shared.opts.pformat_blacklisted_tags.split() if tag]
+    BLACKLISTED_TAGS = [re.compile(tag) for tag in shared.opts.pformat_blacklisted_tags.split()]
 
 script_callbacks.on_before_component(on_before_component)
 script_callbacks.on_ui_settings(on_ui_settings)
