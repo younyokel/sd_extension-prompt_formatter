@@ -1,7 +1,7 @@
 import unicodedata
 import gradio as gr
 import regex as re
-from modules import script_callbacks, scripts, shared
+from modules import script_callbacks, shared
 
 """
 Variables
@@ -24,6 +24,7 @@ bracket_pairs = dict(zip("([{", ")]}"))
 bracket_pairs_reverse = dict(zip(")]}", "([{"))
 
 # Regular expression patterns
+re_break = re.compile(r"\s*BREAK\s*")
 re_angle_bracket = re.compile(r"<[^>]+>")
 re_brackets = re.compile(r'([([{<])|([)\]}>])')
 re_brackets_open = re.compile(r"(?<!\\)(\(+|\[+)")
@@ -39,10 +40,9 @@ def normalize_characters(data: str):
     return unicodedata.normalize("NFKC", data)
 
 def remove_whitespace_excessive(prompt: str):
-    prompt = re.sub(r'\n\s*\n+', "\n", prompt)
     lines = prompt.split("\n")
-    cleaned_lines = [" ".join(re.split(r'[^\S\r\n]+', line)).strip() for line in lines]
-    return "\n".join(cleaned_lines).strip()
+    cleaned_lines = [" ".join(line.split()).strip() for line in lines if line.strip()]
+    return "\n".join(cleaned_lines)
 
 def align_brackets(prompt: str):
     return re_brackets.sub(lambda m: m.group(1) or m.group(2), prompt)
@@ -63,29 +63,25 @@ def align_commas(prompt: str):
 def remove_mismatched_brackets(prompt: str):
     stack = []
     pos = []
-    ret = ""
+    result = []
 
     for i, c in enumerate(prompt):
         if c in brackets_opening:
             stack.append(c)
-            pos.append(i)
-            ret += c
+            pos.append(len(result))
+            result.append(c)
         elif c in brackets_closing:
-            if not stack:
-                continue
-            if stack[-1] == get_bracket_opening(c):
+            if stack and stack[-1] == get_bracket_opening(c):
                 stack.pop()
                 pos.pop()
-                ret += c
+                result.append(c)
         else:
-            ret += c
+            result.append(c)
 
-    while stack:
-        bracket = stack.pop()
-        p = pos.pop()
-        ret = ret[:p] + ret[p + 1 :]
+    for p in reversed(pos):
+        result.pop(p)
 
-    return ret
+    return "".join(result)
 
 def space_brackets(prompt: str):
     def helper(match: re.Match):
@@ -278,13 +274,13 @@ def space_to_underscore(prompt: str):
 
     return ",".join(tokens)
 
-def dedupe_tokens(prompt: str) -> str:
+def dedupe_tokens(prompt: str):
     # Define separators and bracket patterns
-    separators = [',', r'\s*BREAK\s*', r'<[^>]+>']  # Ensure "BREAK" is treated properly
+    separators = [',', re_break.pattern, r'<[^>]+>']
     bracket_pattern = r'(?<!\\)(\([^)]*\)|\[[^\]]*\])'  # Match (content) or [content], but ignore escaped brackets
 
     # Create a regex pattern that captures both separators and bracketed expressions
-    pattern = f'({bracket_pattern}|{"|".join(separators)})'
+    dedupe_pattern = re.compile(f'({bracket_pattern}|{"|".join(separators)})')
 
     # Preserve line breaks by splitting on them first
     lines = prompt.splitlines()
@@ -295,7 +291,7 @@ def dedupe_tokens(prompt: str) -> str:
 
     for line in lines:
         # Split the line while keeping separators and bracketed expressions
-        parts = [p for p in re.split(pattern, line) if p is not None]  # Filter out None values
+        parts = [p for p in dedupe_pattern.split(line) if p is not None]
 
         result = []
 
@@ -327,7 +323,7 @@ def dedupe_tokens(prompt: str) -> str:
         output = ''.join(result)
 
         # Ensure spaces around "BREAK"
-        output = re.sub(r'\s*BREAK\s*', r' BREAK ', output).strip()
+        output = re_break.sub(r' BREAK ', output).strip()
 
         # Normalize spaces (trim and collapse excessive spaces)
         if output:  # Only add non-empty lines
@@ -378,10 +374,12 @@ def format_prompt(*prompts: tuple[dict]):
         # Clean up the string
         prompt = normalize_characters(prompt)
         prompt = remove_mismatched_brackets(prompt)
-        prompt = extra_networks_shift(prompt)
 
         # Remove duplicates
         prompt = dedupe_tokens(prompt)
+
+        # Move activation text to the left of network tags
+        prompt = extra_networks_shift(prompt)
 
         # Clean up whitespace for cool beans
         prompt = remove_whitespace_excessive(prompt)
@@ -398,49 +396,54 @@ def format_prompt(*prompts: tuple[dict]):
 
     return ret
 
+def process_line(line: str):
+    # Skip empty lines or lines with special cases
+    if not line.strip() or "BREAK" in line or "," in line or (("(" in line or ")" in line) and "_" not in line):
+        return line
+
+    # Process tags
+    raw_tags = line.strip().split()
+
+    # Filter out blacklisted tags using regex
+    filtered_tags = filter_blacklisted_tags(raw_tags)
+
+    # Apply formatting to remaining tags
+    formatted_tags = format_tags(filtered_tags)
+
+    # Join tags with commas
+    result = ", ".join(formatted_tags)
+
+    # Add a trailing comma if the original line ends with a newline
+    if line.endswith("\n") and not result.endswith(","):
+        result += ","
+
+    return result + ("\n" if line.endswith("\n") else "")
+
+def filter_blacklisted_tags(tags: list[str]):
+    """Filter out tags that match any pattern in BLACKLISTED_TAGS."""
+    return [tag for tag in tags if not any(pattern.fullmatch(tag) for pattern in BLACKLISTED_TAGS)]
+
+def format_tags(tags: list[str]):
+    """Format tags by replacing underscores and escaping parentheses."""
+    return [
+        tag.replace("_", " ")
+           .replace("\\(", "(")
+           .replace("\\)", ")")
+           .replace("(", "\\(")
+           .replace(")", "\\)")
+        for tag in tags
+    ]
+
 def convert_tags(*prompts: tuple[dict]):
     global previous_prompts
     previous_prompts = prompts[0].copy()
-    
-    converted_prompts = []
-    
-    for component, prompt in prompts[0].items():
-        converted_lines = []
-        
-        for line in prompt.splitlines(keepends=True):
-            # Skip processing for special cases
-            if (not line.strip() or 
-                "BREAK" in line or 
-                "," in line or 
-                (("(" in line or ")" in line) and "_" not in line)):
-                converted_lines.append(line)
-                continue
-            
-            # Process tags
-            raw_tags = line.strip().split()
-            
-            # Filter out blacklisted tags using regex
-            raw_tags = [tag for tag in raw_tags 
-                        if not any(pattern.fullmatch(tag) for pattern in BLACKLISTED_TAGS)]
-            
-            # Apply formatting to remaining tags
-            tags = [tag.replace("_", " ")
-                   .replace("\\(", "(")
-                   .replace("\\)", ")")
-                   .replace("(", "\\(")
-                   .replace(")", "\\)") 
-                   for tag in raw_tags]
-            
-            result = ", ".join(tags)
-            
-            # Add comma if needed
-            if line.endswith("\n") and not result.endswith(","):
-                result += ","
-                
-            converted_lines.append(result + ("\n" if line.endswith("\n") else ""))
 
+    converted_prompts = []
+
+    for component, prompt in prompts[0].items():
+        converted_lines = [process_line(line) for line in prompt.splitlines(keepends=True)]
         converted_prompts.append("".join(converted_lines))
-    
+
     return converted_prompts
 
 def undo_convert():
@@ -462,7 +465,7 @@ def on_before_component(component: gr.component, **kwargs: dict):
                 convert_button = gr.Button(value="✒️", elem_classes="tool", elem_id="convert_tags", tooltip="Convert Danbooru tags to comma-separated format")
                 convert_button.click(fn=convert_tags, inputs=ui_prompts, outputs=ui_prompts)
 
-                undo_button = gr.Button(value="↩️", elem_classes="tool", elem_id="undo_convert", tooltip="Undo last Danbooru conversion")
+                undo_button = gr.Button(value="⏪", elem_classes="tool", elem_id="undo_convert", tooltip="Undo last Danbooru conversion")
                 undo_button.click(fn=undo_convert, inputs=None, outputs=ui_prompts)
 
                 return ui_component
