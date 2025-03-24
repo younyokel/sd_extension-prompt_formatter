@@ -22,6 +22,7 @@ brackets_opening = set("([{")
 brackets_closing = set(")]}")
 bracket_pairs = dict(zip("([{", ")]}"))
 bracket_pairs_reverse = dict(zip(")]}", "([{"))
+bracket_pattern = r'(?<!\\)(?:\([^)]*\)|\[[^\]]*\])(?=(?:\s*(?:,|BREAK|<[^>]+>)|\s*$))'
 
 # Regular expression patterns
 re_break = re.compile(r"\s*BREAK\s*")
@@ -275,61 +276,46 @@ def space_to_underscore(prompt: str):
     return ",".join(tokens)
 
 def dedupe_tokens(prompt: str):
-    # Define separators and bracket patterns
+    # Define separators and dedupe pattern
     separators = [',', re_break.pattern, r'<[^>]+>']
-    bracket_pattern = r'(?<!\\)(\([^)]*\)|\[[^\]]*\])'  # Match (content) or [content], but ignore escaped brackets
-
-    # Create a regex pattern that captures both separators and bracketed expressions
-    dedupe_pattern = re.compile(f'({bracket_pattern}|{"|".join(separators)})')
-
-    # Preserve line breaks by splitting on them first
+    dedupe_pattern = re.compile(f'({bracket_pattern}|(?:{"|".join(separators)}))')
+    
     lines = prompt.splitlines()
     processed_lines = []
-    
-    # Use a global seen set to track tokens across all lines
     seen = set()
-
+    
     for line in lines:
-        # Split the line while keeping separators and bracketed expressions
+        # If no separator is found, leave the line unchanged.
+        if not re.search(f'(?:{"|".join(separators)})', line):
+            processed_lines.append(line)
+            continue
+        
+        # Split the line while preserving tokens.
         parts = [p for p in dedupe_pattern.split(line) if p is not None]
-
         result = []
-
+        
         for part in parts:
-            if part is None:
-                continue  # Skip any None values (extra safety)
-
             normalized = part.strip()
+            if not normalized:
+                continue
 
-            # Always keep separators
-            if re.fullmatch('|'.join(separators), part):
-                if part.strip() == "BREAK":
-                    result.append(" BREAK ")  # Ensure spacing
-                elif re.match(r'<[^>]+>', part):
-                    result.append(f" {part.strip()} ")  # Ensure spacing around <tags>
+            # Check if this part is one of the separators.
+            if any(re.fullmatch(sep, normalized) for sep in separators):
+                if normalized == "BREAK":
+                    result.append(" BREAK ")
+                elif re.fullmatch(r'<[^>]+>', normalized):
+                    result.append(f" {normalized} ")
                 else:
-                    result.append(part.strip())  # Trim spaces around other separators
-            # Keep bracketed expressions as whole tokens but dedupe them
-            elif re.fullmatch(bracket_pattern, part):
-                if part not in seen:
-                    seen.add(part)
+                    result.append(f" {normalized} ")
+            else:
+                if normalized not in seen:
+                    seen.add(normalized)
                     result.append(part)
-            # Dedupe regular words (ignore empty tokens)
-            elif normalized and normalized not in seen:
-                seen.add(normalized)
-                result.append(part)
-
-        # Join with empty string to preserve intended spacing
+        
         output = ''.join(result)
-
-        # Ensure spaces around "BREAK"
         output = re_break.sub(r' BREAK ', output).strip()
-
-        # Normalize spaces (trim and collapse excessive spaces)
-        if output:  # Only add non-empty lines
-            processed_lines.append(' '.join(output.split()))
-
-    # Preserve line breaks between lines, ensuring no excess blank lines
+        processed_lines.append(' '.join(output.split()))
+    
     return '\n'.join(processed_lines).strip()
 
 def comma_before_bracket(prompt: str):
