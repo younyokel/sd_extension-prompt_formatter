@@ -8,14 +8,13 @@ Variables
 """
 
 # Formatting control flags
-SPACE_COMMAS = True             # Whether to add spaces after commas
-BRACKET2WEIGHT = True           # Whether to convert multiple brackets to weights
-CONV_SPACE_UNDERSCORE = "None"  # Controls space/underscore conversion mode
-BLACKLISTED_TAGS = []           # Tags to filter out during conversion
+BRACKET2WEIGHT = True             # Whether to convert multiple brackets to weights
+CONV_SPACE_UNDERSCORE = "None"    # Controls space/underscore conversion mode
+BLACKLISTED_TAGS = []             # Compiled blacklist patterns
 
 # UI prompt storage
-ui_prompts = set()              # Stores the UI prompts for processing
-previous_prompts = {}           # Store previous prompts for undoing
+ui_prompts = set()                # Stores the UI prompts for processing
+previous_prompts = {}             # Store previous prompts for undoing
 
 # Bracket handling
 brackets_opening = set("([{")
@@ -55,9 +54,6 @@ def space_and(prompt: str):
     return re.sub(r"(.*?)\s*(AND)\s*(.*?)", helper, prompt)
 
 def align_commas(prompt: str):
-    if not SPACE_COMMAS:
-        return prompt
-
     split = [s.strip() for s in prompt.split(',') if s.strip()]
     return ", ".join(split)
 
@@ -343,7 +339,7 @@ def extra_networks_shift(prompt: str):
             return f', {activation} {network}{rest}'
         return f'{network}{content}'
     
-    return re.sub(r'(<[^>]+>)([^<]*)', match, prompt)
+    return re.sub(r'(<\S+>)([^<]*)', match, prompt)
 
 def format_prompt(*prompts: tuple[dict]):
     global previous_prompts
@@ -382,55 +378,49 @@ def format_prompt(*prompts: tuple[dict]):
 
     return ret
 
-def process_line(line: str):
-    # Skip empty lines or lines with special cases
-    if not line.strip() or "BREAK" in line or "," in line or (("(" in line or ")" in line) and "_" not in line):
-        return line
-
-    # Process tags
-    raw_tags = line.strip().split()
-
-    # Filter out blacklisted tags using regex
-    filtered_tags = filter_blacklisted_tags(raw_tags)
-
-    # Apply formatting to remaining tags
-    formatted_tags = format_tags(filtered_tags)
-
-    # Join tags with commas
-    result = ", ".join(formatted_tags)
-
-    # Add a trailing comma if the original line ends with a newline
-    if line.endswith("\n") and not result.endswith(","):
-        result += ","
-
-    return result + ("\n" if line.endswith("\n") else "")
-
-def filter_blacklisted_tags(tags: list[str]):
-    """Filter out tags that match any pattern in BLACKLISTED_TAGS."""
-    return [tag for tag in tags if not any(pattern.fullmatch(tag) for pattern in BLACKLISTED_TAGS)]
-
-def format_tags(tags: list[str]):
-    """Format tags by replacing underscores and escaping parentheses."""
-    return [
-        tag.replace("_", " ")
-           .replace("\\(", "(")
-           .replace("\\)", ")")
-           .replace("(", "\\(")
-           .replace(")", "\\)")
-        for tag in tags
-    ]
-
 def convert_tags(*prompts: tuple[dict]):
-    global previous_prompts
-    previous_prompts = prompts[0].copy()
+    global previous_prompts, BLACKLISTED_TAGS
+
+    previous_prompts = prompts[0].copy()  # Save state before modifications
 
     converted_prompts = []
+    remove_parens = str.maketrans({"(": "", ")": ""})
 
     for component, prompt in prompts[0].items():
-        converted_lines = [process_line(line) for line in prompt.splitlines(keepends=True)]
-        converted_prompts.append("".join(converted_lines))
+        output_lines = []
 
-    return converted_prompts
+        for line in prompt.splitlines(keepends=True):
+            # Skip special cases
+            if not line.strip() or "BREAK" in line or "," in line or (("(" in line or ")" in line) and "_" not in line):
+                output_lines.append(line)
+                continue
+
+            # Process tags
+            raw_tags = line.strip().split()
+            filtered_tags = [
+                tag for tag in raw_tags
+                if not any(pat.fullmatch(tag.translate(remove_parens)) for pat in BLACKLISTED_TAGS)
+            ]
+
+            # Format tags: replace underscores & escape parentheses
+            formatted_tags = [
+                tag.replace("_", " ")
+                   .replace("\\(", "(")
+                   .replace("\\)", ")")
+                   .replace("(", r"\(")
+                   .replace(")", r"\)")
+                for tag in filtered_tags
+            ]
+
+            # Convert to final format
+            result = ", ".join(formatted_tags)
+            result += ","
+
+            output_lines.append(result + ("\n" if line.endswith("\n") else ""))
+
+        converted_prompts.append("".join(output_lines))  # Store processed output
+
+    return converted_prompts  # Return as a list to match expected format
 
 def undo_convert():
     if previous_prompts:
@@ -448,36 +438,32 @@ def on_before_component(component: gr.component, **kwargs: dict):
                 format_button = gr.Button(value="💫", elem_classes="tool", elem_id="format", tooltip="Format and clean up the prompt")
                 format_button.click(fn=format_prompt, inputs=ui_prompts, outputs=ui_prompts)
 
-                convert_button = gr.Button(value="✒️", elem_classes="tool", elem_id="convert_tags", tooltip="Convert Danbooru tags to comma-separated format")
+                convert_button = gr.Button(value="✒️", elem_classes="tool", elem_id="convert_tags", tooltip="Convert Danbooru-style tags to comma-separated format")
                 convert_button.click(fn=convert_tags, inputs=ui_prompts, outputs=ui_prompts)
 
-                undo_button = gr.Button(value="⏪", elem_classes="tool", elem_id="undo_convert", tooltip="Undo last Danbooru conversion")
+                undo_button = gr.Button(value="⏪", elem_classes="tool", elem_id="undo_convert", tooltip="Undo last change")
                 undo_button.click(fn=undo_convert, inputs=None, outputs=ui_prompts)
 
                 return ui_component
     return None
 
 def on_ui_settings():
-    section = ("pformat", "Prompt Formatter")
-    shared.opts.add_option(
-        "pformat_space_commas",
-        shared.OptionInfo(
-            True,
-            "Add a spaces after comma",
-            gr.Checkbox,
-            {"interactive": True},
-            section=section,
-        ),
-    )
+    from modules.options import categories
+    categories.register_category("sd", "Stable Diffusion")
+    section = ("sd", "Prompt Formatter")
+    
     shared.opts.add_option(
         "pformat_bracket2weight",
         shared.OptionInfo(
             True,
-            "Convert excessive brackets to weights",
+            "Convert nested/excessive brackets into weights",
             gr.Checkbox,
-            {"interactive": True},
+            {
+                "interactive": True,
+            },
             section=section,
-        ),
+            category_id="sd",
+        ).info("e.g., <em>(((text)))</strong> → (text:1.33)</em>; same effect, but less clutter."),
     )
     shared.opts.add_option(
         "pformat_convert_space_underscore",
@@ -485,29 +471,49 @@ def on_ui_settings():
             "None",
             "Space/underscore convert handling",
             gr.Radio,
-            {"choices": ["None", "Spaces to underscores", "Underscores to spaces"]},
+            {
+                "choices": ["None", "Spaces to underscores", "Underscores to spaces"],
+            },
             section=section,
+            category_id="sd",
+        ).info(
+            """<p>&emsp;&emsp;Choose how spaces and underscores are handled in prompts.<br>
+            <p>&emsp;&emsp;For example: 'Spaces to underscores' converts <em>'my_text' → 'my text'</em>.<br>
+            <p>&emsp;&emsp;Tip: Use the '✒️' button to convert Danbooru-style tags, which automatically handles this conversion."""
         ),
     )
     shared.opts.add_option(
-        "pformat_blacklisted_tags",
+        "pformat_blacklist_string",
         shared.OptionInfo(
-            "tagme text english_text japanese_text text_bubble speech_bubble onomatopoeia dialogue 20\d\d",
+            "tagme .*text .*_bubble onomatopoeia dialogue\n.*_(artwork) watermark signature 20\d\d",
             "Blacklisted tags",
             gr.Textbox,
-            {"interactive": True},
+            {
+                "lines": 2,
+                "interactive": True,
+                "placeholder": (
+                    "tagme .*text .*_bubble onomatopoeia dialogue\n"
+                    ".*_(artwork) watermark signature 20\\d\\d"
+                ),
+            },
             section=section,
-        ).info("space-separated; will be filtered out on tag conversion. Supports regex."),
+            category_id="sd",
+        ).info("Space-separated or newline-separated; supports regex."),
     )
 
+    shared.opts.onchange("pformat_blacklist_string", sync_settings)
     sync_settings()
 
 def sync_settings():
-    global SPACE_COMMAS, BRACKET2WEIGHT, CONV_SPACE_UNDERSCORE, BLACKLISTED_TAGS
-    SPACE_COMMAS = shared.opts.pformat_space_commas
+    global BRACKET2WEIGHT, CONV_SPACE_UNDERSCORE, BLACKLISTED_TAGS
     BRACKET2WEIGHT = shared.opts.pformat_bracket2weight
     CONV_SPACE_UNDERSCORE = shared.opts.pformat_convert_space_underscore
-    BLACKLISTED_TAGS = [re.compile(tag) for tag in shared.opts.pformat_blacklisted_tags.split()]
+    BLACKLISTED_TAGS = [
+        re.compile(pattern.strip())
+        for line in shared.opts.pformat_blacklist_string.splitlines()
+        for pattern in line.split()
+        if pattern.strip()
+    ]
 
 script_callbacks.on_before_component(on_before_component)
 script_callbacks.on_ui_settings(on_ui_settings)
