@@ -319,27 +319,23 @@ def comma_before_bracket(prompt: str):
 
 def extra_networks_shift(prompt: str):
     def match(m):
-        # Extract the network tag and the content following it
         network, content = m.groups()
         
         sep_match = re.search(r'(\n|BREAK)', content)
         
         if sep_match:
-            # If a separator is found, split the content into activation and the rest
             sep_pos = sep_match.start()
             activation = content[:sep_pos].strip().rstrip(',')
             rest = content[sep_pos:]
         else:
-            # If no separator, treat the entire content as activation
             activation = content.strip().rstrip(',')
             rest = ''
         
-        # If activation exists and does not contain a comma, prepend it to the network tag
         if activation and ',' not in activation:
             return f', {activation} {network}{rest}'
         return f'{network}{content}'
     
-    return re.sub(r'(<\S+>)([^<]*)', match, prompt)
+    return re.sub(r'(<[^<>]+>)([^<]*)', match, prompt)
 
 def format_prompt(*prompts: tuple[dict]):
     global previous_prompts
